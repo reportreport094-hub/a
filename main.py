@@ -7,7 +7,14 @@ from datetime import datetime
 import re
 import asyncio
 import threading
-from telethon import TelegramClient, errors, functions, types
+from telethon import TelegramClient, functions, types
+from telethon.errors import (
+    SessionPasswordNeededError,
+    PhoneCodeInvalidError,
+    PhoneNumberInvalidError,
+    PhoneCodeExpiredError,
+    FloodWaitError
+)
 import time
 
 # تنظیم لاگینگ
@@ -63,7 +70,7 @@ data = load_data()
 
 # ==================== متغیرهای موقت ====================
 
-user_temp = {}  # برای ذخیره اطلاعات موقت ورود سلف
+user_temp = {}
 report_temp = {}
 
 # ==================== منوها ====================
@@ -134,13 +141,12 @@ def start(message):
         reply_markup=main_menu()
     )
 
-# ==================== افزودن اکانت (به روش کد شما) ====================
+# ==================== افزودن اکانت ====================
 
 @bot.callback_query_handler(func=lambda call: call.data == "add_account")
 def add_account_start(call):
     user_id = call.from_user.id
     
-    # ریست اطلاعات قبلی
     if user_id in user_temp:
         del user_temp[user_id]
     user_temp[user_id] = {}
@@ -255,7 +261,6 @@ def process_api_hash(message):
         parse_mode='HTML'
     )
     
-    # شروع اتصال در ترد جداگانه
     start_connection(user_id, message, status_msg)
 
 def start_connection(user_id, message, status_msg):
@@ -537,7 +542,6 @@ async def get_account_info(message, client, user_id, status_msg):
             "is_active": True
         }
         
-        # بررسی تکراری نبودن
         if any(a.get('user_id') == me.id for a in data["accounts"]):
             await bot.edit_message_text(
                 "⚠️ این اکانت قبلاً ثبت شده!",
@@ -1364,7 +1368,7 @@ if __name__ == "__main__":
     print(f"📋 گزارش‌ها: {len(data['reports'])}")
     print("=" * 50)
     print("🔄 در حال اجرا...")
-    print("✅ افزودن اکانت با روش سلف (شماره، API ID، API Hash، کد تایید)")
+    print("✅ تمام خطاهای Telethon import شدند")
     
     try:
         bot.infinity_polling(timeout=10, long_polling_timeout=5)
