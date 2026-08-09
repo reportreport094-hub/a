@@ -25,7 +25,9 @@ SESSIONS_DIR = "sessions"
 
 os.makedirs(SESSIONS_DIR, exist_ok=True)
 
+# ایجاد ربات با remove_webhook برای رفع خطای 409
 bot = telebot.TeleBot(TOKEN, parse_mode='HTML')
+bot.remove_webhook()  # این خط رو اضافه کردم تا خطای 409 رفع بشه
 
 # ==================== دیتا ====================
 
@@ -67,22 +69,18 @@ report_temp = {}
 def main_menu():
     markup = InlineKeyboardMarkup(row_width=2)
     
-    # ردیف اول: ریپورت گروهی (تک دکمه)
     markup.add(InlineKeyboardButton("🛡 ریپورت گروهی", callback_data="report_group"))
     
-    # ردیف دوم: دو دکمه
     markup.add(
         InlineKeyboardButton("➕ افزودن اکانت", callback_data="add_account"),
         InlineKeyboardButton("📋 لیست اکانت‌ها", callback_data="list_accounts")
     )
     
-    # ردیف سوم: دو دکمه
     markup.add(
         InlineKeyboardButton("📊 گزارشات", callback_data="reports"),
         InlineKeyboardButton("👤 مدیریت ادمین", callback_data="manage_admins")
     )
     
-    # ردیف چهارم: راهنما
     markup.add(InlineKeyboardButton("❓ راهنما", callback_data="help"))
     
     return markup
@@ -289,8 +287,9 @@ async def connect_to_telegram(user_id, message, status_msg):
             bot.edit_message_text(
                 f"📨 <b>کد تایید ارسال شد!</b>\n\n"
                 f"📱 شماره: <code>{phone}</code>\n\n"
-                "🔑 کد ۵ رقمی رو که به تلگرامت اومده وارد کن:\n"
-                "(اگر کد نیومد، دوباره تلاش کن)",
+                "🔑 کد تایید رو به صورت <b>۱.۲.۳.۴.۵</b> وارد کن:\n"
+                "(مثلاً اگر کد ۱۲۳۴۵ است، عدد ۱۲۳۴۵ رو وارد کن)\n\n"
+                "⚠️ توجه: کد باید ۵ رقم باشه و منقضی نمیشه!",
                 chat_id=message.chat.id,
                 message_id=status_msg.message_id,
                 reply_markup=back_to_main(),
@@ -313,10 +312,14 @@ async def connect_to_telegram(user_id, message, status_msg):
 def verify_code(message, client, user_id):
     code = message.text.strip()
     
+    # پاک کردن نقطه‌ها (اگه کاربر ۱.۲.۳.۴.۵ وارد کرده باشه)
+    code = code.replace('.', '').replace('،', '').replace(' ', '')
+    
     if not code.isdigit() or len(code) != 5:
         msg = bot.send_message(
             message.chat.id,
-            "❌ کد باید ۵ رقم باشه! لطفاً دوباره وارد کن:",
+            "❌ کد باید ۵ رقم باشه! لطفاً کد رو به صورت ۱.۲.۳.۴.۵ وارد کن:\n"
+            "مثال: <code>12345</code> یا <code>1.2.3.4.5</code>",
             reply_markup=back_to_main(),
             parse_mode='HTML'
         )
@@ -354,9 +357,47 @@ async def verify_code_async(message, client, user_id, code, status_msg):
         )
         bot.register_next_step_handler(message, process_password, client, user_id)
         
+    except errors.rpcerrorlist.PhoneCodeExpiredError:
+        bot.edit_message_text(
+            "❌ کد تایید منقضی شده!\n\n"
+            "لطفاً دوباره تلاش کن و کد جدید رو وارد کن.\n"
+            "کد رو به صورت <b>۱.۲.۳.۴.۵</b> وارد کن.",
+            chat_id=message.chat.id,
+            message_id=status_msg.message_id,
+            reply_markup=back_to_main(),
+            parse_mode='HTML'
+        )
+        # دوباره کد بفرست
+        client = user_temp.get(user_id, {}).get("client")
+        if client:
+            try:
+                phone = user_temp.get(user_id, {}).get("phone")
+                await client.send_code_request(phone)
+                bot.send_message(
+                    message.chat.id,
+                    "📨 کد جدید ارسال شد! لطفاً وارد کن:",
+                    reply_markup=back_to_main(),
+                    parse_mode='HTML'
+                )
+                bot.register_next_step_handler(message, verify_code, client, user_id)
+            except:
+                pass
+        
+    except errors.rpcerrorlist.PhoneCodeInvalidError:
+        bot.edit_message_text(
+            "❌ کد اشتباه!\n\n"
+            "لطفاً کد رو دقیق وارد کن.\n"
+            "کد رو به صورت <b>۱.۲.۳.۴.۵</b> وارد کن.",
+            chat_id=message.chat.id,
+            message_id=status_msg.message_id,
+            reply_markup=back_to_main(),
+            parse_mode='HTML'
+        )
+        bot.register_next_step_handler(message, verify_code, client, user_id)
+        
     except Exception as e:
         bot.edit_message_text(
-            f"❌ کد اشتباه یا منقضی شده!\n\n{str(e)}",
+            f"❌ خطا!\n\n{str(e)}",
             chat_id=message.chat.id,
             message_id=status_msg.message_id,
             reply_markup=back_to_main(),
@@ -899,7 +940,6 @@ async def execute_report_async(user_id, message, status_msg):
                     fail += 1
                     results.append(f"❌ {account.get('phone')}: خطا {i+1}")
                 
-                # بروزرسانی وضعیت
                 try:
                     total = len(accounts) * repeat
                     done = idx * repeat + i + 1
@@ -923,7 +963,6 @@ async def execute_report_async(user_id, message, status_msg):
             fail += 1
             results.append(f"❌ {account.get('phone')}: خطا")
     
-    # ثبت گزارش
     report_data = {
         "group": group,
         "post": post_link,
@@ -1178,7 +1217,7 @@ def help_menu(call):
 
 <b>➕ افزودن اکانت:</b>
 اضافه کردن اکانت تلگرام با سشن
-مراحل: شماره → API ID → API Hash → کد تایید
+مراحل: شماره → API ID → API Hash → کد تایید (به صورت ۱.۲.۳.۴.۵)
 
 <b>📋 لیست اکانت‌ها:</b>
 مشاهده همه اکانت‌های ثبت شده و حذف اکانت‌های اضافی
@@ -1192,6 +1231,7 @@ def help_menu(call):
 ⚠️ <b>نکات مهم:</b>
 • برای ریپورت حداقل ۱ اکانت نیاز دارید
 • API ID و Hash رو از my.telegram.org بگیر
+• کد تایید رو به صورت ۱.۲.۳.۴.۵ وارد کن
 • سشن‌ها به صورت امن ذخیره میشن
 """
     
@@ -1249,6 +1289,7 @@ if __name__ == "__main__":
     print(f"📋 گزارش‌ها: {len(data['reports'])}")
     print("=" * 50)
     print("🔄 در حال اجرا...")
+    print("✅ Webhook حذف شد - خطای 409 برطرف شد")
     
     try:
         bot.infinity_polling(timeout=10, long_polling_timeout=5)
