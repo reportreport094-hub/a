@@ -25,7 +25,6 @@ SESSIONS_DIR = "sessions"
 
 os.makedirs(SESSIONS_DIR, exist_ok=True)
 
-# ایجاد ربات با remove_webhook
 bot = telebot.TeleBot(TOKEN, parse_mode='HTML')
 try:
     bot.remove_webhook()
@@ -64,7 +63,7 @@ data = load_data()
 
 # ==================== متغیرهای موقت ====================
 
-user_temp = {}
+user_temp = {}  # برای ذخیره اطلاعات موقت ورود سلف
 report_temp = {}
 
 # ==================== منوها ====================
@@ -118,16 +117,15 @@ def start(message):
         return
     
     welcome_text = """
-🌟 <b>به ربات مدیریت تلگرام خوش آمدید!</b>
+🌟 <b>ربات مدیریت تلگرام</b>
 
-📌 <b>راهنمای سریع:</b>
-🛡 ریپورت گروهی: برای گزارش گروه‌های متخلف
-➕ افزودن اکانت: اضافه کردن اکانت با سشن
-📋 لیست اکانت‌ها: مشاهده اکانت‌های ثبت شده
-📊 گزارشات: مشاهده تاریخچه ریپورت‌ها
-👤 مدیریت ادمین: افزودن/حذف ادمین
+📌 <b>قابلیت‌ها:</b>
+🛡 ریپورت گروهی با چندین اکانت
+➕ افزودن اکانت با سشن (شماره، API ID، API Hash، کد تایید)
+📋 مدیریت اکانت‌ها
+📊 مشاهده گزارشات
 
-⚠️ <b>نکته:</b> برای ریپورت حداقل ۱ اکانت نیاز دارید.
+برای شروع یکی از گزینه‌ها رو انتخاب کن.
 """
     
     bot.send_message(
@@ -136,12 +134,13 @@ def start(message):
         reply_markup=main_menu()
     )
 
-# ==================== افزودن اکانت ====================
+# ==================== افزودن اکانت (به روش کد شما) ====================
 
 @bot.callback_query_handler(func=lambda call: call.data == "add_account")
 def add_account_start(call):
     user_id = call.from_user.id
     
+    # ریست اطلاعات قبلی
     if user_id in user_temp:
         del user_temp[user_id]
     user_temp[user_id] = {}
@@ -154,13 +153,13 @@ def add_account_start(call):
     msg = bot.send_message(
         call.message.chat.id,
         "➕ <b>افزودن اکانت جدید</b>\n\n"
-        "برای اضافه کردن اکانت، مراحل زیر رو طی کن:\n\n"
-        "1️⃣ شماره تلفن (همراه با کد کشور)\n"
+        "برای اضافه کردن اکانت، اطلاعات زیر رو وارد کن:\n\n"
+        "1️⃣ شماره تلفن (با کد کشور)\n"
+        "   مثال: <code>+989123456789</code>\n\n"
         "2️⃣ API ID (از my.telegram.org)\n"
         "3️⃣ API Hash (از my.telegram.org)\n"
         "4️⃣ کد تایید (به تلگرامت ارسال میشه)\n\n"
-        "📱 <b>شماره تلفن</b> رو وارد کن:\n"
-        "مثال: <code>+989123456789</code>",
+        "📱 <b>شماره تلفن</b> رو وارد کن:",
         reply_markup=back_to_main(),
         parse_mode='HTML'
     )
@@ -172,10 +171,10 @@ def process_phone(message):
     user_id = message.from_user.id
     phone = message.text.strip()
     
-    if not re.match(r'^\+?\d{10,15}$', phone):
+    if not re.match(r'^\+?[0-9]{10,15}$', phone):
         msg = bot.send_message(
             message.chat.id,
-            "❌ شماره نامعتبر! لطفاً با فرمت صحیح وارد کن:\n"
+            "❌ شماره نامعتبر! لطفاً با کد کشور وارد کن.\n"
             "مثال: <code>+989123456789</code>",
             reply_markup=back_to_main(),
             parse_mode='HTML'
@@ -183,13 +182,14 @@ def process_phone(message):
         bot.register_next_step_handler(msg, process_phone)
         return
     
-    user_temp[user_id]["phone"] = phone
+    user_temp[user_id]['phone'] = phone
     
     msg = bot.send_message(
         message.chat.id,
         f"✅ شماره <code>{phone}</code> ثبت شد.\n\n"
-        "🔑 حالا <b>API ID</b> رو وارد کن:\n"
-        "(از سایت my.telegram.org دریافت کن)",
+        "🔑 <b>API ID</b> رو وارد کن:\n"
+        "(از سایت my.telegram.org دریافت کن)\n"
+        "⚠️ API ID باید عددی بین 1 تا 2147483647 باشه.",
         reply_markup=back_to_main(),
         parse_mode='HTML'
     )
@@ -199,22 +199,34 @@ def process_api_id(message):
     user_id = message.from_user.id
     api_id = message.text.strip()
     
-    if not api_id.isdigit():
+    try:
+        api_id_int = int(api_id)
+        if api_id_int > 2147483647:
+            msg = bot.send_message(
+                message.chat.id,
+                "❌ عدد خیلی بزرگه! API ID باید بین 1 تا 2147483647 باشه.",
+                reply_markup=back_to_main(),
+                parse_mode='HTML'
+            )
+            bot.register_next_step_handler(msg, process_api_id)
+            return
+    except:
         msg = bot.send_message(
             message.chat.id,
-            "❌ API ID باید عدد باشه! لطفاً دوباره وارد کن:",
+            "❌ API ID باید عدد باشه! لطفاً دوباره وارد کن.",
             reply_markup=back_to_main(),
             parse_mode='HTML'
         )
         bot.register_next_step_handler(msg, process_api_id)
         return
     
-    user_temp[user_id]["api_id"] = api_id
+    user_temp[user_id]['api_id'] = api_id
     
     msg = bot.send_message(
         message.chat.id,
         f"✅ API ID ثبت شد.\n\n"
-        "🔐 حالا <b>API Hash</b> رو وارد کن:",
+        "🔐 <b>API Hash</b> رو وارد کن:\n"
+        "(از my.telegram.org دریافت کن)",
         reply_markup=back_to_main(),
         parse_mode='HTML'
     )
@@ -224,17 +236,17 @@ def process_api_hash(message):
     user_id = message.from_user.id
     api_hash = message.text.strip()
     
-    if len(api_hash) < 10:
+    if len(api_hash) < 20:
         msg = bot.send_message(
             message.chat.id,
-            "❌ API Hash نامعتبر! لطفاً دوباره وارد کن:",
+            "❌ API Hash نامعتبر! لطفاً دوباره وارد کن.",
             reply_markup=back_to_main(),
             parse_mode='HTML'
         )
         bot.register_next_step_handler(msg, process_api_hash)
         return
     
-    user_temp[user_id]["api_hash"] = api_hash
+    user_temp[user_id]['api_hash'] = api_hash
     
     status_msg = bot.send_message(
         message.chat.id,
@@ -243,7 +255,7 @@ def process_api_hash(message):
         parse_mode='HTML'
     )
     
-    # شروع اتصال در ترد جداگانه با event loop جدید
+    # شروع اتصال در ترد جداگانه
     start_connection(user_id, message, status_msg)
 
 def start_connection(user_id, message, status_msg):
@@ -262,7 +274,6 @@ def start_connection(user_id, message, status_msg):
         )
         return
     
-    # ایجاد event loop جدید برای هر ترد
     def run_async():
         try:
             loop = asyncio.new_event_loop()
@@ -301,7 +312,7 @@ async def connect_to_telegram(user_id, message, status_msg):
         if not await client.is_user_authorized():
             await client.send_code_request(phone)
             
-            user_temp[user_id]["client"] = client
+            user_temp[user_id]['client'] = client
             
             await bot.edit_message_text(
                 f"📨 <b>کد تایید ارسال شد!</b>\n\n"
@@ -319,24 +330,35 @@ async def connect_to_telegram(user_id, message, status_msg):
         else:
             await get_account_info(message, client, user_id, status_msg)
             
+    except PhoneNumberInvalidError:
+        await bot.edit_message_text(
+            "❌ شماره وارد شده معتبر نیست!",
+            chat_id=message.chat.id,
+            message_id=status_msg.message_id,
+            reply_markup=main_menu(),
+            parse_mode='HTML'
+        )
+    except FloodWaitError as e:
+        await bot.edit_message_text(
+            f"⏳ لطفاً {e.seconds} ثانیه صبر کن و دوباره تلاش کن.",
+            chat_id=message.chat.id,
+            message_id=status_msg.message_id,
+            reply_markup=main_menu(),
+            parse_mode='HTML'
+        )
     except Exception as e:
         logger.error(f"Error connecting: {e}")
-        try:
-            await bot.edit_message_text(
-                f"❌ خطا در اتصال!\n\n{str(e)}",
-                chat_id=message.chat.id,
-                message_id=status_msg.message_id,
-                reply_markup=main_menu(),
-                parse_mode='HTML'
-            )
-        except:
-            pass
+        await bot.edit_message_text(
+            f"❌ خطا در اتصال!\n\n{str(e)}",
+            chat_id=message.chat.id,
+            message_id=status_msg.message_id,
+            reply_markup=main_menu(),
+            parse_mode='HTML'
+        )
 
 def verify_code(message, client, user_id):
-    code = message.text.strip()
-    
-    # پاک کردن نقطه‌ها
-    code = code.replace('.', '').replace('،', '').replace(' ', '')
+    code_input = message.text.strip()
+    code = code_input.replace('.', '').replace('،', '').replace(' ', '').strip()
     
     if not code.isdigit() or len(code) != 5:
         msg = bot.send_message(
@@ -355,7 +377,6 @@ def verify_code(message, client, user_id):
         parse_mode='HTML'
     )
     
-    # ایجاد event loop جدید برای تایید کد
     def run_async():
         try:
             loop = asyncio.new_event_loop()
@@ -384,9 +405,9 @@ async def verify_code_async(message, client, user_id, code, status_msg):
         await client.sign_in(code=code)
         await get_account_info(message, client, user_id, status_msg)
         
-    except errors.SessionPasswordNeededError:
+    except SessionPasswordNeededError:
         await bot.edit_message_text(
-            "🔑 <b>این اکانت پسورد داره!</b>\n\n"
+            "🔑 <b>این اکانت پسورد (Two-Factor) داره!</b>\n\n"
             "لطفاً پسورد اکانت رو وارد کن:",
             chat_id=message.chat.id,
             message_id=status_msg.message_id,
@@ -395,16 +416,15 @@ async def verify_code_async(message, client, user_id, code, status_msg):
         )
         bot.register_next_step_handler(message, process_password, client, user_id)
         
-    except errors.rpcerrorlist.PhoneCodeExpiredError:
+    except PhoneCodeExpiredError:
         await bot.edit_message_text(
             "❌ کد تایید منقضی شده!\n\n"
-            "لطفاً دوباره تلاش کن و کد جدید رو وارد کن.",
+            "در حال ارسال کد جدید...",
             chat_id=message.chat.id,
             message_id=status_msg.message_id,
             reply_markup=back_to_main(),
             parse_mode='HTML'
         )
-        # کد جدید بفرست
         try:
             phone = user_temp.get(user_id, {}).get("phone")
             await client.send_code_request(phone)
@@ -415,10 +435,16 @@ async def verify_code_async(message, client, user_id, code, status_msg):
                 parse_mode='HTML'
             )
             bot.register_next_step_handler(message, verify_code, client, user_id)
-        except:
-            pass
+        except Exception as e:
+            await bot.edit_message_text(
+                f"❌ خطا در ارسال کد جدید: {str(e)}",
+                chat_id=message.chat.id,
+                message_id=status_msg.message_id,
+                reply_markup=main_menu(),
+                parse_mode='HTML'
+            )
         
-    except errors.rpcerrorlist.PhoneCodeInvalidError:
+    except PhoneCodeInvalidError:
         await bot.edit_message_text(
             "❌ کد اشتباه!\n\n"
             "لطفاً کد رو دقیق وارد کن.\n"
@@ -433,10 +459,10 @@ async def verify_code_async(message, client, user_id, code, status_msg):
     except Exception as e:
         logger.error(f"Error verifying: {e}")
         await bot.edit_message_text(
-            f"❌ خطا!\n\n{str(e)}",
+            f"❌ خطا در تایید کد!\n\n{str(e)}",
             chat_id=message.chat.id,
             message_id=status_msg.message_id,
-            reply_markup=back_to_main(),
+            reply_markup=main_menu(),
             parse_mode='HTML'
         )
 
@@ -511,6 +537,7 @@ async def get_account_info(message, client, user_id, status_msg):
             "is_active": True
         }
         
+        # بررسی تکراری نبودن
         if any(a.get('user_id') == me.id for a in data["accounts"]):
             await bot.edit_message_text(
                 "⚠️ این اکانت قبلاً ثبت شده!",
@@ -955,6 +982,17 @@ async def execute_report_async(user_id, message, status_msg):
     fail = 0
     results = []
     
+    await bot.edit_message_text(
+        f"⏳ در حال ریپورت...\n\n"
+        f"📊 اکانت‌ها: {len(accounts)}\n"
+        f"🔄 دفعات: {repeat}\n"
+        f"✅ موفق: 0\n"
+        f"❌ ناموفق: 0",
+        chat_id=message.chat.id,
+        message_id=status_msg.message_id,
+        parse_mode='HTML'
+    )
+    
     for idx, account in enumerate(accounts):
         try:
             session_file = account.get("session_file")
@@ -974,7 +1012,7 @@ async def execute_report_async(user_id, message, status_msg):
             
             try:
                 entity = await client.get_entity(f"@{group}")
-            except:
+            except Exception as e:
                 fail += 1
                 results.append(f"❌ {account.get('phone')}: گروه یافت نشد")
                 await client.disconnect()
@@ -1255,7 +1293,7 @@ def help_menu(call):
 
 <b>➕ افزودن اکانت:</b>
 اضافه کردن اکانت تلگرام با سشن
-مراحل: شماره → API ID → API Hash → کد تایید (به صورت ۱.۲.۳.۴.۵)
+مراحل: شماره → API ID → API Hash → کد تایید
 
 <b>📋 لیست اکانت‌ها:</b>
 مشاهده همه اکانت‌های ثبت شده و حذف اکانت‌های اضافی
@@ -1270,7 +1308,6 @@ def help_menu(call):
 • برای ریپورت حداقل ۱ اکانت نیاز دارید
 • API ID و Hash رو از my.telegram.org بگیر
 • کد تایید رو به صورت ۱.۲.۳.۴.۵ وارد کن
-• سشن‌ها به صورت امن ذخیره میشن
 """
     
     bot.edit_message_text(
@@ -1327,7 +1364,7 @@ if __name__ == "__main__":
     print(f"📋 گزارش‌ها: {len(data['reports'])}")
     print("=" * 50)
     print("🔄 در حال اجرا...")
-    print("✅ Event loop مدیریت شد - خطا برطرف شد")
+    print("✅ افزودن اکانت با روش سلف (شماره، API ID، API Hash، کد تایید)")
     
     try:
         bot.infinity_polling(timeout=10, long_polling_timeout=5)
