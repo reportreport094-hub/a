@@ -25,9 +25,12 @@ SESSIONS_DIR = "sessions"
 
 os.makedirs(SESSIONS_DIR, exist_ok=True)
 
-# ایجاد ربات با remove_webhook برای رفع خطای 409
+# ایجاد ربات با remove_webhook
 bot = telebot.TeleBot(TOKEN, parse_mode='HTML')
-bot.remove_webhook()  # این خط رو اضافه کردم تا خطای 409 رفع بشه
+try:
+    bot.remove_webhook()
+except:
+    pass
 
 # ==================== دیتا ====================
 
@@ -240,6 +243,7 @@ def process_api_hash(message):
         parse_mode='HTML'
     )
     
+    # شروع اتصال در ترد جداگانه با event loop جدید
     start_connection(user_id, message, status_msg)
 
 def start_connection(user_id, message, status_msg):
@@ -258,13 +262,28 @@ def start_connection(user_id, message, status_msg):
         )
         return
     
+    # ایجاد event loop جدید برای هر ترد
     def run_async():
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(connect_to_telegram(user_id, message, status_msg))
-        loop.close()
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(connect_to_telegram(user_id, message, status_msg))
+            loop.close()
+        except Exception as e:
+            logger.error(f"Error in async thread: {e}")
+            try:
+                bot.edit_message_text(
+                    f"❌ خطا در اتصال!\n\n{str(e)}",
+                    chat_id=message.chat.id,
+                    message_id=status_msg.message_id,
+                    reply_markup=main_menu(),
+                    parse_mode='HTML'
+                )
+            except:
+                pass
     
     thread = threading.Thread(target=run_async)
+    thread.daemon = True
     thread.start()
 
 async def connect_to_telegram(user_id, message, status_msg):
@@ -275,7 +294,7 @@ async def connect_to_telegram(user_id, message, status_msg):
     
     try:
         session_file = os.path.join(SESSIONS_DIR, f"{phone}.session")
-        client = TelegramClient(session_file, int(api_id), api_hash)
+        client = TelegramClient(session_file, int(api_id), api_hash, loop=asyncio.get_running_loop())
         
         await client.connect()
         
@@ -284,12 +303,12 @@ async def connect_to_telegram(user_id, message, status_msg):
             
             user_temp[user_id]["client"] = client
             
-            bot.edit_message_text(
+            await bot.edit_message_text(
                 f"📨 <b>کد تایید ارسال شد!</b>\n\n"
                 f"📱 شماره: <code>{phone}</code>\n\n"
                 "🔑 کد تایید رو به صورت <b>۱.۲.۳.۴.۵</b> وارد کن:\n"
                 "(مثلاً اگر کد ۱۲۳۴۵ است، عدد ۱۲۳۴۵ رو وارد کن)\n\n"
-                "⚠️ توجه: کد باید ۵ رقم باشه و منقضی نمیشه!",
+                "⚠️ توجه: کد باید ۵ رقم باشه",
                 chat_id=message.chat.id,
                 message_id=status_msg.message_id,
                 reply_markup=back_to_main(),
@@ -301,18 +320,22 @@ async def connect_to_telegram(user_id, message, status_msg):
             await get_account_info(message, client, user_id, status_msg)
             
     except Exception as e:
-        bot.edit_message_text(
-            f"❌ خطا در اتصال!\n\n{str(e)}",
-            chat_id=message.chat.id,
-            message_id=status_msg.message_id,
-            reply_markup=main_menu(),
-            parse_mode='HTML'
-        )
+        logger.error(f"Error connecting: {e}")
+        try:
+            await bot.edit_message_text(
+                f"❌ خطا در اتصال!\n\n{str(e)}",
+                chat_id=message.chat.id,
+                message_id=status_msg.message_id,
+                reply_markup=main_menu(),
+                parse_mode='HTML'
+            )
+        except:
+            pass
 
 def verify_code(message, client, user_id):
     code = message.text.strip()
     
-    # پاک کردن نقطه‌ها (اگه کاربر ۱.۲.۳.۴.۵ وارد کرده باشه)
+    # پاک کردن نقطه‌ها
     code = code.replace('.', '').replace('،', '').replace(' ', '')
     
     if not code.isdigit() or len(code) != 5:
@@ -332,13 +355,28 @@ def verify_code(message, client, user_id):
         parse_mode='HTML'
     )
     
+    # ایجاد event loop جدید برای تایید کد
     def run_async():
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(verify_code_async(message, client, user_id, code, status_msg))
-        loop.close()
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(verify_code_async(message, client, user_id, code, status_msg))
+            loop.close()
+        except Exception as e:
+            logger.error(f"Error in verify async: {e}")
+            try:
+                bot.edit_message_text(
+                    f"❌ خطا!\n\n{str(e)}",
+                    chat_id=message.chat.id,
+                    message_id=status_msg.message_id,
+                    reply_markup=main_menu(),
+                    parse_mode='HTML'
+                )
+            except:
+                pass
     
     thread = threading.Thread(target=run_async)
+    thread.daemon = True
     thread.start()
 
 async def verify_code_async(message, client, user_id, code, status_msg):
@@ -347,7 +385,7 @@ async def verify_code_async(message, client, user_id, code, status_msg):
         await get_account_info(message, client, user_id, status_msg)
         
     except errors.SessionPasswordNeededError:
-        bot.edit_message_text(
+        await bot.edit_message_text(
             "🔑 <b>این اکانت پسورد داره!</b>\n\n"
             "لطفاً پسورد اکانت رو وارد کن:",
             chat_id=message.chat.id,
@@ -358,33 +396,30 @@ async def verify_code_async(message, client, user_id, code, status_msg):
         bot.register_next_step_handler(message, process_password, client, user_id)
         
     except errors.rpcerrorlist.PhoneCodeExpiredError:
-        bot.edit_message_text(
+        await bot.edit_message_text(
             "❌ کد تایید منقضی شده!\n\n"
-            "لطفاً دوباره تلاش کن و کد جدید رو وارد کن.\n"
-            "کد رو به صورت <b>۱.۲.۳.۴.۵</b> وارد کن.",
+            "لطفاً دوباره تلاش کن و کد جدید رو وارد کن.",
             chat_id=message.chat.id,
             message_id=status_msg.message_id,
             reply_markup=back_to_main(),
             parse_mode='HTML'
         )
-        # دوباره کد بفرست
-        client = user_temp.get(user_id, {}).get("client")
-        if client:
-            try:
-                phone = user_temp.get(user_id, {}).get("phone")
-                await client.send_code_request(phone)
-                bot.send_message(
-                    message.chat.id,
-                    "📨 کد جدید ارسال شد! لطفاً وارد کن:",
-                    reply_markup=back_to_main(),
-                    parse_mode='HTML'
-                )
-                bot.register_next_step_handler(message, verify_code, client, user_id)
-            except:
-                pass
+        # کد جدید بفرست
+        try:
+            phone = user_temp.get(user_id, {}).get("phone")
+            await client.send_code_request(phone)
+            await bot.send_message(
+                message.chat.id,
+                "📨 کد جدید ارسال شد! لطفاً وارد کن:",
+                reply_markup=back_to_main(),
+                parse_mode='HTML'
+            )
+            bot.register_next_step_handler(message, verify_code, client, user_id)
+        except:
+            pass
         
     except errors.rpcerrorlist.PhoneCodeInvalidError:
-        bot.edit_message_text(
+        await bot.edit_message_text(
             "❌ کد اشتباه!\n\n"
             "لطفاً کد رو دقیق وارد کن.\n"
             "کد رو به صورت <b>۱.۲.۳.۴.۵</b> وارد کن.",
@@ -396,7 +431,8 @@ async def verify_code_async(message, client, user_id, code, status_msg):
         bot.register_next_step_handler(message, verify_code, client, user_id)
         
     except Exception as e:
-        bot.edit_message_text(
+        logger.error(f"Error verifying: {e}")
+        await bot.edit_message_text(
             f"❌ خطا!\n\n{str(e)}",
             chat_id=message.chat.id,
             message_id=status_msg.message_id,
@@ -424,12 +460,26 @@ def process_password(message, client, user_id):
     )
     
     def run_async():
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(verify_password_async(message, client, user_id, password, status_msg))
-        loop.close()
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(verify_password_async(message, client, user_id, password, status_msg))
+            loop.close()
+        except Exception as e:
+            logger.error(f"Error in password async: {e}")
+            try:
+                bot.edit_message_text(
+                    f"❌ خطا!\n\n{str(e)}",
+                    chat_id=message.chat.id,
+                    message_id=status_msg.message_id,
+                    reply_markup=main_menu(),
+                    parse_mode='HTML'
+                )
+            except:
+                pass
     
     thread = threading.Thread(target=run_async)
+    thread.daemon = True
     thread.start()
 
 async def verify_password_async(message, client, user_id, password, status_msg):
@@ -437,7 +487,8 @@ async def verify_password_async(message, client, user_id, password, status_msg):
         await client.sign_in(password=password)
         await get_account_info(message, client, user_id, status_msg)
     except Exception as e:
-        bot.edit_message_text(
+        logger.error(f"Error verifying password: {e}")
+        await bot.edit_message_text(
             f"❌ پسورد اشتباه!\n\n{str(e)}",
             chat_id=message.chat.id,
             message_id=status_msg.message_id,
@@ -461,7 +512,7 @@ async def get_account_info(message, client, user_id, status_msg):
         }
         
         if any(a.get('user_id') == me.id for a in data["accounts"]):
-            bot.edit_message_text(
+            await bot.edit_message_text(
                 "⚠️ این اکانت قبلاً ثبت شده!",
                 chat_id=message.chat.id,
                 message_id=status_msg.message_id,
@@ -476,7 +527,7 @@ async def get_account_info(message, client, user_id, status_msg):
         data["accounts"].append(account)
         save_data(data)
         
-        bot.edit_message_text(
+        await bot.edit_message_text(
             f"✅ <b>اکانت با موفقیت اضافه شد!</b>\n\n"
             f"📱 شماره: <code>{account['phone']}</code>\n"
             f"👤 نام: {account['first_name']} {account.get('last_name', '')}\n"
@@ -494,7 +545,8 @@ async def get_account_info(message, client, user_id, status_msg):
         await client.disconnect()
         
     except Exception as e:
-        bot.edit_message_text(
+        logger.error(f"Error getting account: {e}")
+        await bot.edit_message_text(
             f"❌ خطا: {str(e)}",
             chat_id=message.chat.id,
             message_id=status_msg.message_id,
@@ -853,12 +905,26 @@ def execute_report(call):
     )
     
     def run():
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(execute_report_async(user_id, call.message, status_msg))
-        loop.close()
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(execute_report_async(user_id, call.message, status_msg))
+            loop.close()
+        except Exception as e:
+            logger.error(f"Error in report: {e}")
+            try:
+                bot.edit_message_text(
+                    f"❌ خطا در اجرا!\n\n{str(e)}",
+                    chat_id=call.message.chat.id,
+                    message_id=status_msg.message_id,
+                    reply_markup=main_menu(),
+                    parse_mode='HTML'
+                )
+            except:
+                pass
     
     thread = threading.Thread(target=run)
+    thread.daemon = True
     thread.start()
     
     bot.answer_callback_query(call.id, "✅ در حال اجرا...")
@@ -876,7 +942,7 @@ async def execute_report_async(user_id, message, status_msg):
     accounts = data["accounts"][:count]
     
     if len(accounts) < count:
-        bot.edit_message_text(
+        await bot.edit_message_text(
             "❌ تعداد اکانت کافی نیست!",
             chat_id=message.chat.id,
             message_id=status_msg.message_id,
@@ -889,17 +955,6 @@ async def execute_report_async(user_id, message, status_msg):
     fail = 0
     results = []
     
-    bot.edit_message_text(
-        f"⏳ در حال ریپورت...\n\n"
-        f"📊 اکانت‌ها: {len(accounts)}\n"
-        f"🔄 دفعات: {repeat}\n"
-        f"✅ موفق: 0\n"
-        f"❌ ناموفق: 0",
-        chat_id=message.chat.id,
-        message_id=status_msg.message_id,
-        parse_mode='HTML'
-    )
-    
     for idx, account in enumerate(accounts):
         try:
             session_file = account.get("session_file")
@@ -908,7 +963,7 @@ async def execute_report_async(user_id, message, status_msg):
                 results.append(f"❌ {account.get('phone')}: سشن یافت نشد")
                 continue
             
-            client = TelegramClient(session_file, 0, 0)
+            client = TelegramClient(session_file, 0, 0, loop=asyncio.get_running_loop())
             await client.connect()
             
             if not await client.is_user_authorized():
@@ -939,23 +994,6 @@ async def execute_report_async(user_id, message, status_msg):
                 except Exception as e:
                     fail += 1
                     results.append(f"❌ {account.get('phone')}: خطا {i+1}")
-                
-                try:
-                    total = len(accounts) * repeat
-                    done = idx * repeat + i + 1
-                    progress = int(done / total * 100)
-                    bot.edit_message_text(
-                        f"⏳ در حال ریپورت... {progress}%\n\n"
-                        f"📊 اکانت‌ها: {len(accounts)}\n"
-                        f"🔄 دفعات: {repeat}\n"
-                        f"✅ موفق: {success}\n"
-                        f"❌ ناموفق: {fail}",
-                        chat_id=message.chat.id,
-                        message_id=status_msg.message_id,
-                        parse_mode='HTML'
-                    )
-                except:
-                    pass
             
             await client.disconnect()
             
@@ -996,7 +1034,7 @@ async def execute_report_async(user_id, message, status_msg):
     if len(results) > 5:
         result_text += f"\n\n<i>... و {len(results)-5} نتیجه دیگر</i>"
     
-    bot.edit_message_text(
+    await bot.edit_message_text(
         result_text,
         chat_id=message.chat.id,
         message_id=status_msg.message_id,
@@ -1289,7 +1327,7 @@ if __name__ == "__main__":
     print(f"📋 گزارش‌ها: {len(data['reports'])}")
     print("=" * 50)
     print("🔄 در حال اجرا...")
-    print("✅ Webhook حذف شد - خطای 409 برطرف شد")
+    print("✅ Event loop مدیریت شد - خطا برطرف شد")
     
     try:
         bot.infinity_polling(timeout=10, long_polling_timeout=5)
