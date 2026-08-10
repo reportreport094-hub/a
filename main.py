@@ -128,7 +128,7 @@ def start(message):
 
 📌 <b>قابلیت‌ها:</b>
 🛡 ریپورت گروهی با چندین اکانت
-➕ افزودن اکانت با سشن (شماره، API ID، API Hash، کد تایید)
+➕ افزودن اکانت با سشن
 📋 مدیریت اکانت‌ها
 📊 مشاهده گزارشات
 
@@ -319,7 +319,8 @@ async def connect_to_telegram(user_id, message, status_msg):
             
             user_temp[user_id]['client'] = client
             
-            await bot.edit_message_text(
+            # اینجا از bot.edit_message_text بدون await استفاده میکنیم
+            bot.edit_message_text(
                 f"📨 <b>کد تایید ارسال شد!</b>\n\n"
                 f"📱 شماره: <code>{phone}</code>\n\n"
                 "🔑 کد تایید رو به صورت <b>۱.۲.۳.۴.۵</b> وارد کن:\n"
@@ -336,7 +337,7 @@ async def connect_to_telegram(user_id, message, status_msg):
             await get_account_info(message, client, user_id, status_msg)
             
     except PhoneNumberInvalidError:
-        await bot.edit_message_text(
+        bot.edit_message_text(
             "❌ شماره وارد شده معتبر نیست!",
             chat_id=message.chat.id,
             message_id=status_msg.message_id,
@@ -344,7 +345,7 @@ async def connect_to_telegram(user_id, message, status_msg):
             parse_mode='HTML'
         )
     except FloodWaitError as e:
-        await bot.edit_message_text(
+        bot.edit_message_text(
             f"⏳ لطفاً {e.seconds} ثانیه صبر کن و دوباره تلاش کن.",
             chat_id=message.chat.id,
             message_id=status_msg.message_id,
@@ -353,7 +354,7 @@ async def connect_to_telegram(user_id, message, status_msg):
         )
     except Exception as e:
         logger.error(f"Error connecting: {e}")
-        await bot.edit_message_text(
+        bot.edit_message_text(
             f"❌ خطا در اتصال!\n\n{str(e)}",
             chat_id=message.chat.id,
             message_id=status_msg.message_id,
@@ -411,7 +412,7 @@ async def verify_code_async(message, client, user_id, code, status_msg):
         await get_account_info(message, client, user_id, status_msg)
         
     except SessionPasswordNeededError:
-        await bot.edit_message_text(
+        bot.edit_message_text(
             "🔑 <b>این اکانت پسورد (Two-Factor) داره!</b>\n\n"
             "لطفاً پسورد اکانت رو وارد کن:",
             chat_id=message.chat.id,
@@ -422,7 +423,7 @@ async def verify_code_async(message, client, user_id, code, status_msg):
         bot.register_next_step_handler(message, process_password, client, user_id)
         
     except PhoneCodeExpiredError:
-        await bot.edit_message_text(
+        bot.edit_message_text(
             "❌ کد تایید منقضی شده!\n\n"
             "در حال ارسال کد جدید...",
             chat_id=message.chat.id,
@@ -433,7 +434,7 @@ async def verify_code_async(message, client, user_id, code, status_msg):
         try:
             phone = user_temp.get(user_id, {}).get("phone")
             await client.send_code_request(phone)
-            await bot.send_message(
+            bot.send_message(
                 message.chat.id,
                 "📨 کد جدید ارسال شد! لطفاً وارد کن:",
                 reply_markup=back_to_main(),
@@ -441,7 +442,7 @@ async def verify_code_async(message, client, user_id, code, status_msg):
             )
             bot.register_next_step_handler(message, verify_code, client, user_id)
         except Exception as e:
-            await bot.edit_message_text(
+            bot.edit_message_text(
                 f"❌ خطا در ارسال کد جدید: {str(e)}",
                 chat_id=message.chat.id,
                 message_id=status_msg.message_id,
@@ -450,7 +451,7 @@ async def verify_code_async(message, client, user_id, code, status_msg):
             )
         
     except PhoneCodeInvalidError:
-        await bot.edit_message_text(
+        bot.edit_message_text(
             "❌ کد اشتباه!\n\n"
             "لطفاً کد رو دقیق وارد کن.\n"
             "کد رو به صورت <b>۱.۲.۳.۴.۵</b> وارد کن.",
@@ -463,7 +464,7 @@ async def verify_code_async(message, client, user_id, code, status_msg):
         
     except Exception as e:
         logger.error(f"Error verifying: {e}")
-        await bot.edit_message_text(
+        bot.edit_message_text(
             f"❌ خطا در تایید کد!\n\n{str(e)}",
             chat_id=message.chat.id,
             message_id=status_msg.message_id,
@@ -519,7 +520,7 @@ async def verify_password_async(message, client, user_id, password, status_msg):
         await get_account_info(message, client, user_id, status_msg)
     except Exception as e:
         logger.error(f"Error verifying password: {e}")
-        await bot.edit_message_text(
+        bot.edit_message_text(
             f"❌ پسورد اشتباه!\n\n{str(e)}",
             chat_id=message.chat.id,
             message_id=status_msg.message_id,
@@ -543,7 +544,7 @@ async def get_account_info(message, client, user_id, status_msg):
         }
         
         if any(a.get('user_id') == me.id for a in data["accounts"]):
-            await bot.edit_message_text(
+            bot.edit_message_text(
                 "⚠️ این اکانت قبلاً ثبت شده!",
                 chat_id=message.chat.id,
                 message_id=status_msg.message_id,
@@ -558,7 +559,7 @@ async def get_account_info(message, client, user_id, status_msg):
         data["accounts"].append(account)
         save_data(data)
         
-        await bot.edit_message_text(
+        bot.edit_message_text(
             f"✅ <b>اکانت با موفقیت اضافه شد!</b>\n\n"
             f"📱 شماره: <code>{account['phone']}</code>\n"
             f"👤 نام: {account['first_name']} {account.get('last_name', '')}\n"
@@ -577,7 +578,7 @@ async def get_account_info(message, client, user_id, status_msg):
         
     except Exception as e:
         logger.error(f"Error getting account: {e}")
-        await bot.edit_message_text(
+        bot.edit_message_text(
             f"❌ خطا: {str(e)}",
             chat_id=message.chat.id,
             message_id=status_msg.message_id,
@@ -585,7 +586,9 @@ async def get_account_info(message, client, user_id, status_msg):
             parse_mode='HTML'
         )
 
-# ==================== لیست اکانت‌ها ====================
+# ==================== ادامه کد (لیست اکانت‌ها، ریپورت، مدیریت ادمین و ...) ====================
+
+# [قسمت‌های لیست اکانت‌ها، ریپورت گروهی، مدیریت ادمین و راهنما از کد قبلی]
 
 @bot.callback_query_handler(func=lambda call: call.data == "list_accounts")
 def list_accounts(call):
@@ -973,7 +976,7 @@ async def execute_report_async(user_id, message, status_msg):
     accounts = data["accounts"][:count]
     
     if len(accounts) < count:
-        await bot.edit_message_text(
+        bot.edit_message_text(
             "❌ تعداد اکانت کافی نیست!",
             chat_id=message.chat.id,
             message_id=status_msg.message_id,
@@ -986,7 +989,7 @@ async def execute_report_async(user_id, message, status_msg):
     fail = 0
     results = []
     
-    await bot.edit_message_text(
+    bot.edit_message_text(
         f"⏳ در حال ریپورت...\n\n"
         f"📊 اکانت‌ها: {len(accounts)}\n"
         f"🔄 دفعات: {repeat}\n"
@@ -1076,7 +1079,7 @@ async def execute_report_async(user_id, message, status_msg):
     if len(results) > 5:
         result_text += f"\n\n<i>... و {len(results)-5} نتیجه دیگر</i>"
     
-    await bot.edit_message_text(
+    bot.edit_message_text(
         result_text,
         chat_id=message.chat.id,
         message_id=status_msg.message_id,
@@ -1368,7 +1371,6 @@ if __name__ == "__main__":
     print(f"📋 گزارش‌ها: {len(data['reports'])}")
     print("=" * 50)
     print("🔄 در حال اجرا...")
-    print("✅ تمام خطاهای Telethon import شدند")
     
     try:
         bot.infinity_polling(timeout=10, long_polling_timeout=5)
