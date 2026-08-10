@@ -319,48 +319,62 @@ async def connect_to_telegram(user_id, message, status_msg):
             
             user_temp[user_id]['client'] = client
             
-            # اینجا از bot.edit_message_text بدون await استفاده میکنیم
-            bot.edit_message_text(
-                f"📨 <b>کد تایید ارسال شد!</b>\n\n"
-                f"📱 شماره: <code>{phone}</code>\n\n"
-                "🔑 کد تایید رو به صورت <b>۱.۲.۳.۴.۵</b> وارد کن:\n"
-                "(مثلاً اگر کد ۱۲۳۴۵ است، عدد ۱۲۳۴۵ رو وارد کن)\n\n"
-                "⚠️ توجه: کد باید ۵ رقم باشه",
-                chat_id=message.chat.id,
-                message_id=status_msg.message_id,
-                reply_markup=back_to_main(),
-                parse_mode='HTML'
-            )
+            # استفاده از bot.edit_message_text در async با asyncio
+            def edit_message():
+                try:
+                    bot.edit_message_text(
+                        f"📨 <b>کد تایید ارسال شد!</b>\n\n"
+                        f"📱 شماره: <code>{phone}</code>\n\n"
+                        "🔑 کد تایید رو به صورت <b>۱.۲.۳.۴.۵</b> وارد کن:\n"
+                        "(مثلاً اگر کد ۱۲۳۴۵ است، عدد ۱۲۳۴۵ رو وارد کن)\n\n"
+                        "⚠️ توجه: کد باید ۵ رقم باشه",
+                        chat_id=message.chat.id,
+                        message_id=status_msg.message_id,
+                        reply_markup=back_to_main(),
+                        parse_mode='HTML'
+                    )
+                except Exception as e:
+                    logger.error(f"Error editing message: {e}")
+            
+            await asyncio.get_event_loop().run_in_executor(None, edit_message)
             
             bot.register_next_step_handler(message, verify_code, client, user_id)
         else:
             await get_account_info(message, client, user_id, status_msg)
             
     except PhoneNumberInvalidError:
-        bot.edit_message_text(
-            "❌ شماره وارد شده معتبر نیست!",
-            chat_id=message.chat.id,
-            message_id=status_msg.message_id,
-            reply_markup=main_menu(),
-            parse_mode='HTML'
-        )
+        def edit_message():
+            bot.edit_message_text(
+                "❌ شماره وارد شده معتبر نیست!",
+                chat_id=message.chat.id,
+                message_id=status_msg.message_id,
+                reply_markup=main_menu(),
+                parse_mode='HTML'
+            )
+        await asyncio.get_event_loop().run_in_executor(None, edit_message)
+        
     except FloodWaitError as e:
-        bot.edit_message_text(
-            f"⏳ لطفاً {e.seconds} ثانیه صبر کن و دوباره تلاش کن.",
-            chat_id=message.chat.id,
-            message_id=status_msg.message_id,
-            reply_markup=main_menu(),
-            parse_mode='HTML'
-        )
+        def edit_message():
+            bot.edit_message_text(
+                f"⏳ لطفاً {e.seconds} ثانیه صبر کن و دوباره تلاش کن.",
+                chat_id=message.chat.id,
+                message_id=status_msg.message_id,
+                reply_markup=main_menu(),
+                parse_mode='HTML'
+            )
+        await asyncio.get_event_loop().run_in_executor(None, edit_message)
+        
     except Exception as e:
         logger.error(f"Error connecting: {e}")
-        bot.edit_message_text(
-            f"❌ خطا در اتصال!\n\n{str(e)}",
-            chat_id=message.chat.id,
-            message_id=status_msg.message_id,
-            reply_markup=main_menu(),
-            parse_mode='HTML'
-        )
+        def edit_message():
+            bot.edit_message_text(
+                f"❌ خطا در اتصال!\n\n{str(e)}",
+                chat_id=message.chat.id,
+                message_id=status_msg.message_id,
+                reply_markup=main_menu(),
+                parse_mode='HTML'
+            )
+        await asyncio.get_event_loop().run_in_executor(None, edit_message)
 
 def verify_code(message, client, user_id):
     code_input = message.text.strip()
@@ -412,65 +426,80 @@ async def verify_code_async(message, client, user_id, code, status_msg):
         await get_account_info(message, client, user_id, status_msg)
         
     except SessionPasswordNeededError:
-        bot.edit_message_text(
-            "🔑 <b>این اکانت پسورد (Two-Factor) داره!</b>\n\n"
-            "لطفاً پسورد اکانت رو وارد کن:",
-            chat_id=message.chat.id,
-            message_id=status_msg.message_id,
-            reply_markup=back_to_main(),
-            parse_mode='HTML'
-        )
-        bot.register_next_step_handler(message, process_password, client, user_id)
-        
-    except PhoneCodeExpiredError:
-        bot.edit_message_text(
-            "❌ کد تایید منقضی شده!\n\n"
-            "در حال ارسال کد جدید...",
-            chat_id=message.chat.id,
-            message_id=status_msg.message_id,
-            reply_markup=back_to_main(),
-            parse_mode='HTML'
-        )
-        try:
-            phone = user_temp.get(user_id, {}).get("phone")
-            await client.send_code_request(phone)
-            bot.send_message(
-                message.chat.id,
-                "📨 کد جدید ارسال شد! لطفاً وارد کن:",
+        def edit_message():
+            bot.edit_message_text(
+                "🔑 <b>این اکانت پسورد (Two-Factor) داره!</b>\n\n"
+                "لطفاً پسورد اکانت رو وارد کن:",
+                chat_id=message.chat.id,
+                message_id=status_msg.message_id,
                 reply_markup=back_to_main(),
                 parse_mode='HTML'
             )
-            bot.register_next_step_handler(message, verify_code, client, user_id)
-        except Exception as e:
+        await asyncio.get_event_loop().run_in_executor(None, edit_message)
+        bot.register_next_step_handler(message, process_password, client, user_id)
+        
+    except PhoneCodeExpiredError:
+        def edit_message():
             bot.edit_message_text(
-                f"❌ خطا در ارسال کد جدید: {str(e)}",
+                "❌ کد تایید منقضی شده!\n\n"
+                "در حال ارسال کد جدید...",
+                chat_id=message.chat.id,
+                message_id=status_msg.message_id,
+                reply_markup=back_to_main(),
+                parse_mode='HTML'
+            )
+        await asyncio.get_event_loop().run_in_executor(None, edit_message)
+        
+        try:
+            phone = user_temp.get(user_id, {}).get("phone")
+            await client.send_code_request(phone)
+            
+            def send_message():
+                bot.send_message(
+                    message.chat.id,
+                    "📨 کد جدید ارسال شد! لطفاً وارد کن:",
+                    reply_markup=back_to_main(),
+                    parse_mode='HTML'
+                )
+            await asyncio.get_event_loop().run_in_executor(None, send_message)
+            bot.register_next_step_handler(message, verify_code, client, user_id)
+            
+        except Exception as e:
+            def edit_error():
+                bot.edit_message_text(
+                    f"❌ خطا در ارسال کد جدید: {str(e)}",
+                    chat_id=message.chat.id,
+                    message_id=status_msg.message_id,
+                    reply_markup=main_menu(),
+                    parse_mode='HTML'
+                )
+            await asyncio.get_event_loop().run_in_executor(None, edit_error)
+        
+    except PhoneCodeInvalidError:
+        def edit_message():
+            bot.edit_message_text(
+                "❌ کد اشتباه!\n\n"
+                "لطفاً کد رو دقیق وارد کن.\n"
+                "کد رو به صورت <b>۱.۲.۳.۴.۵</b> وارد کن.",
+                chat_id=message.chat.id,
+                message_id=status_msg.message_id,
+                reply_markup=back_to_main(),
+                parse_mode='HTML'
+            )
+        await asyncio.get_event_loop().run_in_executor(None, edit_message)
+        bot.register_next_step_handler(message, verify_code, client, user_id)
+        
+    except Exception as e:
+        logger.error(f"Error verifying: {e}")
+        def edit_message():
+            bot.edit_message_text(
+                f"❌ خطا در تایید کد!\n\n{str(e)}",
                 chat_id=message.chat.id,
                 message_id=status_msg.message_id,
                 reply_markup=main_menu(),
                 parse_mode='HTML'
             )
-        
-    except PhoneCodeInvalidError:
-        bot.edit_message_text(
-            "❌ کد اشتباه!\n\n"
-            "لطفاً کد رو دقیق وارد کن.\n"
-            "کد رو به صورت <b>۱.۲.۳.۴.۵</b> وارد کن.",
-            chat_id=message.chat.id,
-            message_id=status_msg.message_id,
-            reply_markup=back_to_main(),
-            parse_mode='HTML'
-        )
-        bot.register_next_step_handler(message, verify_code, client, user_id)
-        
-    except Exception as e:
-        logger.error(f"Error verifying: {e}")
-        bot.edit_message_text(
-            f"❌ خطا در تایید کد!\n\n{str(e)}",
-            chat_id=message.chat.id,
-            message_id=status_msg.message_id,
-            reply_markup=main_menu(),
-            parse_mode='HTML'
-        )
+        await asyncio.get_event_loop().run_in_executor(None, edit_message)
 
 def process_password(message, client, user_id):
     password = message.text.strip()
@@ -520,13 +549,15 @@ async def verify_password_async(message, client, user_id, password, status_msg):
         await get_account_info(message, client, user_id, status_msg)
     except Exception as e:
         logger.error(f"Error verifying password: {e}")
-        bot.edit_message_text(
-            f"❌ پسورد اشتباه!\n\n{str(e)}",
-            chat_id=message.chat.id,
-            message_id=status_msg.message_id,
-            reply_markup=back_to_main(),
-            parse_mode='HTML'
-        )
+        def edit_message():
+            bot.edit_message_text(
+                f"❌ پسورد اشتباه!\n\n{str(e)}",
+                chat_id=message.chat.id,
+                message_id=status_msg.message_id,
+                reply_markup=back_to_main(),
+                parse_mode='HTML'
+            )
+        await asyncio.get_event_loop().run_in_executor(None, edit_message)
 
 async def get_account_info(message, client, user_id, status_msg):
     try:
@@ -544,13 +575,16 @@ async def get_account_info(message, client, user_id, status_msg):
         }
         
         if any(a.get('user_id') == me.id for a in data["accounts"]):
-            bot.edit_message_text(
-                "⚠️ این اکانت قبلاً ثبت شده!",
-                chat_id=message.chat.id,
-                message_id=status_msg.message_id,
-                reply_markup=main_menu(),
-                parse_mode='HTML'
-            )
+            def edit_message():
+                bot.edit_message_text(
+                    "⚠️ این اکانت قبلاً ثبت شده!",
+                    chat_id=message.chat.id,
+                    message_id=status_msg.message_id,
+                    reply_markup=main_menu(),
+                    parse_mode='HTML'
+                )
+            await asyncio.get_event_loop().run_in_executor(None, edit_message)
+            
             if user_id in user_temp:
                 del user_temp[user_id]
             await client.disconnect()
@@ -559,17 +593,19 @@ async def get_account_info(message, client, user_id, status_msg):
         data["accounts"].append(account)
         save_data(data)
         
-        bot.edit_message_text(
-            f"✅ <b>اکانت با موفقیت اضافه شد!</b>\n\n"
-            f"📱 شماره: <code>{account['phone']}</code>\n"
-            f"👤 نام: {account['first_name']} {account.get('last_name', '')}\n"
-            f"🆔 آیدی: <code>{account['user_id']}</code>\n\n"
-            "🎉 اکانت آماده استفاده است!",
-            chat_id=message.chat.id,
-            message_id=status_msg.message_id,
-            reply_markup=main_menu(),
-            parse_mode='HTML'
-        )
+        def edit_message():
+            bot.edit_message_text(
+                f"✅ <b>اکانت با موفقیت اضافه شد!</b>\n\n"
+                f"📱 شماره: <code>{account['phone']}</code>\n"
+                f"👤 نام: {account['first_name']} {account.get('last_name', '')}\n"
+                f"🆔 آیدی: <code>{account['user_id']}</code>\n\n"
+                "🎉 اکانت آماده استفاده است!",
+                chat_id=message.chat.id,
+                message_id=status_msg.message_id,
+                reply_markup=main_menu(),
+                parse_mode='HTML'
+            )
+        await asyncio.get_event_loop().run_in_executor(None, edit_message)
         
         if user_id in user_temp:
             del user_temp[user_id]
@@ -578,17 +614,17 @@ async def get_account_info(message, client, user_id, status_msg):
         
     except Exception as e:
         logger.error(f"Error getting account: {e}")
-        bot.edit_message_text(
-            f"❌ خطا: {str(e)}",
-            chat_id=message.chat.id,
-            message_id=status_msg.message_id,
-            reply_markup=main_menu(),
-            parse_mode='HTML'
-        )
+        def edit_message():
+            bot.edit_message_text(
+                f"❌ خطا: {str(e)}",
+                chat_id=message.chat.id,
+                message_id=status_msg.message_id,
+                reply_markup=main_menu(),
+                parse_mode='HTML'
+            )
+        await asyncio.get_event_loop().run_in_executor(None, edit_message)
 
 # ==================== ادامه کد (لیست اکانت‌ها، ریپورت، مدیریت ادمین و ...) ====================
-
-# [قسمت‌های لیست اکانت‌ها، ریپورت گروهی، مدیریت ادمین و راهنما از کد قبلی]
 
 @bot.callback_query_handler(func=lambda call: call.data == "list_accounts")
 def list_accounts(call):
