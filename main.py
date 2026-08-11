@@ -59,11 +59,8 @@ report_temp = {}
 
 # ==================== بررسی دسترسی ====================
 
-def is_admin(user_id):
-    return user_id in ALLOWED_USERS or user_id in data["admins"]
-
 def is_allowed(user_id):
-    return is_admin(user_id)
+    return user_id in ALLOWED_USERS or user_id in data["admins"]
 
 # ==================== منوها ====================
 
