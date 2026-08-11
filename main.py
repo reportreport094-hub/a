@@ -22,8 +22,8 @@ logger = logging.getLogger(__name__)
 
 TOKEN = "8986723154:AAH1qTObY9bo0A-csQFnSDYVcRhYr_DtsJ0"
 ALLOWED_USERS = [7803165903, 7795617350]
-REPORT_CHANNEL = "@ValkyrieReport"  # کانال گزارشات
-REPORT_CHANNEL_ID = -1004392030066  # آیدی عددی کانال
+REPORT_CHANNEL = "@ValkyrieReport"
+REPORT_CHANNEL_ID = -1004392030066
 
 DATA_FILE = "bot_data.json"
 SESSIONS_DIR = "sessions"
@@ -832,6 +832,7 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 join_results.append(f"❌ {account.get('phone')}: سشن یافت نشد")
                 continue
             
+            # استفاده از فایل سشن
             client = TelegramClient(session_file, 0, 0)
             await client.connect()
             
@@ -841,13 +842,11 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 continue
             
             try:
-                # جوین شدن به گروه/کانال
                 entity = await client.get_entity(f"@{group}")
                 await client(functions.channels.JoinChannelRequest(entity))
                 join_results.append(f"✅ {account.get('phone')}: جوین شد")
                 await asyncio.sleep(2)
             except UserNotParticipantError:
-                join_results.append(f"⚠️ {account.get('phone')}: در گروه نیست، تلاش برای جوین...")
                 try:
                     entity = await client.get_entity(f"@{group}")
                     await client(functions.channels.JoinChannelRequest(entity))
@@ -861,7 +860,7 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await client.disconnect()
             
         except Exception as e:
-            join_results.append(f"❌ {account.get('phone')}: خطا")
+            join_results.append(f"❌ {account.get('phone')}: خطا - {str(e)}")
     
     # مرحله 2: انجام ریپورت
     for account in accounts:
@@ -872,6 +871,7 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 results.append(f"❌ {account.get('phone')}: سشن یافت نشد")
                 continue
             
+            # استفاده از فایل سشن
             client = TelegramClient(session_file, 0, 0)
             await client.connect()
             
@@ -891,7 +891,6 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             for i in range(repeat):
                 try:
-                    # ریپورت اسکم و کلاهبرداری
                     await client(functions.messages.ReportRequest(
                         peer=entity,
                         id=[msg_id],
