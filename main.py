@@ -1,11 +1,12 @@
-import telebot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-import json
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 import os
+import re
+import json
 import logging
 from datetime import datetime
-import re
-from telethon import TelegramClient, functions, types
+import asyncio
+from telethon import TelegramClient
 from telethon.errors import (
     SessionPasswordNeededError,
     PhoneCodeInvalidError,
@@ -13,7 +14,6 @@ from telethon.errors import (
     PhoneCodeExpiredError,
     FloodWaitError
 )
-import asyncio
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -25,12 +25,6 @@ DATA_FILE = "bot_data.json"
 SESSIONS_DIR = "sessions"
 
 os.makedirs(SESSIONS_DIR, exist_ok=True)
-
-bot = telebot.TeleBot(TOKEN, parse_mode='HTML')
-try:
-    bot.remove_webhook()
-except:
-    pass
 
 # ==================== دیتا ====================
 
@@ -44,7 +38,7 @@ def load_data():
     return default_data()
 
 def default_data():
-    return {"accounts": [], "admins": [], "reports": [], "orders": []}
+    return {"accounts": [], "admins": [], "reports": []}
 
 def save_data(data):
     try:
@@ -59,43 +53,49 @@ data = load_data()
 
 # ==================== متغیرها ====================
 
+user_states = {}
 user_temp = {}
 report_temp = {}
+
+# ==================== بررسی دسترسی ====================
+
+def is_admin(user_id):
+    return user_id in ALLOWED_USERS or user_id in data["admins"]
+
+def is_allowed(user_id):
+    return is_admin(user_id)
 
 # ==================== منوها ====================
 
 def main_menu():
-    markup = InlineKeyboardMarkup(row_width=2)
-    markup.add(InlineKeyboardButton("🛡 ریپورت گروهی", callback_data="report_group"))
-    markup.add(
-        InlineKeyboardButton("➕ افزودن اکانت", callback_data="add_account"),
-        InlineKeyboardButton("📋 لیست اکانت‌ها", callback_data="list_accounts")
-    )
-    markup.add(
-        InlineKeyboardButton("📊 گزارشات", callback_data="reports"),
-        InlineKeyboardButton("👤 مدیریت ادمین", callback_data="manage_admins")
-    )
-    markup.add(InlineKeyboardButton("❓ راهنما", callback_data="help"))
-    return markup
+    keyboard = [
+        [InlineKeyboardButton("🛡 ریپورت گروهی", callback_data="report_group")],
+        [
+            InlineKeyboardButton("➕ افزودن اکانت", callback_data="add_account"),
+            InlineKeyboardButton("📋 لیست اکانت‌ها", callback_data="list_accounts")
+        ],
+        [
+            InlineKeyboardButton("📊 گزارشات", callback_data="reports"),
+            InlineKeyboardButton("👤 مدیریت ادمین", callback_data="manage_admins")
+        ],
+        [InlineKeyboardButton("❓ راهنما", callback_data="help")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
 
 def back_button():
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_menu"))
-    return markup
-
-def is_allowed(user_id):
-    return user_id in ALLOWED_USERS or user_id in data["admins"]
+    keyboard = [[InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_menu")]]
+    return InlineKeyboardMarkup(keyboard)
 
 # ==================== شروع ====================
 
-@bot.message_handler(commands=['start'])
-def start(message):
-    user_id = message.from_user.id
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    
     if not is_allowed(user_id):
-        bot.send_message(message.chat.id, "🚫 دسترسی غیرمجاز!", parse_mode='HTML')
+        await update.message.reply_text("🚫 دسترسی غیرمجاز!", parse_mode='HTML')
         return
     
-    welcome_text = """
+    text = """
 🌟 <b>به ربات مدیریت تلگرام خوش آمدید!</b>
 
 📌 <b>قابلیت‌ها:</b>
@@ -107,47 +107,51 @@ def start(message):
 برای شروع یکی از گزینه‌ها رو انتخاب کن.
 """
     
-    bot.send_message(message.chat.id, welcome_text, reply_markup=main_menu(), parse_mode='HTML')
+    await update.message.reply_text(text, reply_markup=main_menu(), parse_mode='HTML')
 
 # ==================== افزودن اکانت ====================
 
-@bot.callback_query_handler(func=lambda call: call.data == "add_account")
-def add_account_start(call):
-    user_id = call.from_user.id
-    user_temp[user_id] = {}
+async def add_account_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
     
-    bot.send_message(
-        call.message.chat.id,
-        "➕ <b>افزودن اکانت جدید</b>\n\n"
-        "برای اضافه کردن اکانت، اطلاعات زیر رو وارد کن:\n\n"
-        "1️⃣ شماره تلفن (با کد کشور)\n"
-        "   مثال: <code>+989123456789</code>\n\n"
-        "📱 <b>شماره تلفن</b> رو وارد کن:",
-        reply_markup=back_button(),
-        parse_mode='HTML'
-    )
-    bot.register_next_step_handler(call.message, process_phone)
-    bot.answer_callback_query(call.id)
+    user_id = query.from_user.id
+    user_temp[user_id] = {}
+    user_states[user_id] = "waiting_phone"
+    
+    text = """
+➕ <b>افزودن اکانت جدید</b>
 
-def process_phone(message):
-    user_id = message.from_user.id
-    phone = message.text.strip()
+برای اضافه کردن اکانت، اطلاعات زیر رو وارد کن:
+
+1️⃣ شماره تلفن (با کد کشور)
+   مثال: <code>+989123456789</code>
+
+📱 <b>شماره تلفن</b> رو وارد کن:
+"""
+    
+    await query.edit_message_text(text, reply_markup=back_button(), parse_mode='HTML')
+
+async def handle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    
+    if user_id not in user_states or user_states[user_id] != "waiting_phone":
+        return
+    
+    phone = update.message.text.strip()
     
     if not re.match(r'^\+?[0-9]{10,15}$', phone):
-        bot.send_message(
-            message.chat.id,
-            "❌ شماره نامعتبر! لطفاً با کد کشور وارد کن.\n"
-            "مثال: <code>+989123456789</code>",
+        await update.message.reply_text(
+            "❌ شماره نامعتبر! لطفاً با کد کشور وارد کن.\nمثال: <code>+989123456789</code>",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
-        bot.register_next_step_handler(message, process_phone)
         return
     
     user_temp[user_id]['phone'] = phone
+    user_states[user_id] = "waiting_api_id"
     
-    bot.send_message(
-        message.chat.id,
+    await update.message.reply_text(
         f"✅ شماره <code>{phone}</code> ثبت شد.\n\n"
         "🔑 <b>API ID</b> رو وارد کن:\n"
         "(از سایت my.telegram.org دریافت کن)\n"
@@ -155,115 +159,86 @@ def process_phone(message):
         reply_markup=back_button(),
         parse_mode='HTML'
     )
-    bot.register_next_step_handler(message, process_api_id)
 
-def process_api_id(message):
-    user_id = message.from_user.id
-    api_id = message.text.strip()
+async def handle_api_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    
+    if user_id not in user_states or user_states[user_id] != "waiting_api_id":
+        return
+    
+    api_id = update.message.text.strip()
     
     try:
         api_id_int = int(api_id)
         if api_id_int > 2147483647:
-            bot.send_message(
-                message.chat.id,
+            await update.message.reply_text(
                 "❌ عدد خیلی بزرگه! API ID باید بین 1 تا 2147483647 باشه.",
                 reply_markup=back_button(),
                 parse_mode='HTML'
             )
-            bot.register_next_step_handler(message, process_api_id)
             return
     except:
-        bot.send_message(
-            message.chat.id,
+        await update.message.reply_text(
             "❌ API ID باید عدد باشه! لطفاً دوباره وارد کن.",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
-        bot.register_next_step_handler(message, process_api_id)
         return
     
     user_temp[user_id]['api_id'] = api_id
+    user_states[user_id] = "waiting_api_hash"
     
-    bot.send_message(
-        message.chat.id,
+    await update.message.reply_text(
         f"✅ API ID ثبت شد.\n\n"
         "🔐 <b>API Hash</b> رو وارد کن:\n"
         "(از my.telegram.org دریافت کن)",
         reply_markup=back_button(),
         parse_mode='HTML'
     )
-    bot.register_next_step_handler(message, process_api_hash)
 
-def process_api_hash(message):
-    user_id = message.from_user.id
-    api_hash = message.text.strip()
+async def handle_api_hash(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    
+    if user_id not in user_states or user_states[user_id] != "waiting_api_hash":
+        return
+    
+    api_hash = update.message.text.strip()
     
     if len(api_hash) < 20:
-        bot.send_message(
-            message.chat.id,
+        await update.message.reply_text(
             "❌ API Hash نامعتبر! لطفاً دوباره وارد کن.",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
-        bot.register_next_step_handler(message, process_api_hash)
         return
     
     user_temp[user_id]['api_hash'] = api_hash
+    user_states[user_id] = "waiting_code"
     
-    status_msg = bot.send_message(
-        message.chat.id,
-        "⏳ در حال ارسال کد تایید به تلگرام...\n"
-        "لطفاً صبر کن...",
+    status_msg = await update.message.reply_text(
+        "⏳ در حال ارسال کد تایید به تلگرام...\nلطفاً صبر کن...",
         parse_mode='HTML'
     )
     
-    start_connection(user_id, message, status_msg)
+    await start_connection(user_id, update, status_msg)
 
-# ==================== اتصال با Event Loop درست ====================
-
-def start_connection(user_id, message, status_msg):
+async def start_connection(user_id, update, status_msg):
     temp = user_temp.get(user_id, {})
     phone = temp.get("phone")
     api_id = temp.get("api_id")
     api_hash = temp.get("api_hash")
     
     if not all([phone, api_id, api_hash]):
-        bot.edit_message_text(
+        await status_msg.edit_text(
             "❌ اطلاعات کامل نیست! دوباره تلاش کن.",
-            chat_id=message.chat.id,
-            message_id=status_msg.message_id,
             reply_markup=main_menu(),
             parse_mode='HTML'
         )
         return
     
-    # روش درست: استفاده از asyncio.create_task با event loop جدید
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    
-    try:
-        loop.run_until_complete(connect_to_telegram(user_id, message, status_msg, loop))
-    except Exception as e:
-        logger.error(f"Error: {e}")
-        bot.edit_message_text(
-            f"❌ خطا در اتصال!\n\n{str(e)}",
-            chat_id=message.chat.id,
-            message_id=status_msg.message_id,
-            reply_markup=main_menu(),
-            parse_mode='HTML'
-        )
-    finally:
-        loop.close()
-
-async def connect_to_telegram(user_id, message, status_msg, loop):
-    temp = user_temp.get(user_id, {})
-    phone = temp.get("phone")
-    api_id = temp.get("api_id")
-    api_hash = temp.get("api_hash")
-    
     try:
         session_file = os.path.join(SESSIONS_DIR, f"{phone}.session")
-        client = TelegramClient(session_file, int(api_id), api_hash, loop=loop)
+        client = TelegramClient(session_file, int(api_id), api_hash)
         
         await client.connect()
         
@@ -271,203 +246,164 @@ async def connect_to_telegram(user_id, message, status_msg, loop):
             await client.send_code_request(phone)
             user_temp[user_id]['client'] = client
             
-            bot.edit_message_text(
+            await status_msg.edit_text(
                 f"📨 <b>کد تایید ارسال شد!</b>\n\n"
                 f"📱 شماره: <code>{phone}</code>\n\n"
                 "🔑 کد تایید رو به صورت <b>۱.۲.۳.۴.۵</b> وارد کن:\n"
                 "(مثلاً اگر کد ۱۲۳۴۵ است، عدد ۱۲۳۴۵ رو وارد کن)\n\n"
                 "⚠️ توجه: کد باید ۵ رقم باشه",
-                chat_id=message.chat.id,
-                message_id=status_msg.message_id,
                 reply_markup=back_button(),
                 parse_mode='HTML'
             )
             
-            bot.register_next_step_handler(message, verify_code, client, user_id)
+            user_states[user_id] = "waiting_code"
         else:
-            await get_account_info(message, client, user_id, status_msg)
+            await get_account_info(update, client, user_id, status_msg)
             
     except PhoneNumberInvalidError:
-        bot.edit_message_text(
+        await status_msg.edit_text(
             "❌ شماره وارد شده معتبر نیست!",
-            chat_id=message.chat.id,
-            message_id=status_msg.message_id,
             reply_markup=main_menu(),
             parse_mode='HTML'
         )
     except FloodWaitError as e:
-        bot.edit_message_text(
+        await status_msg.edit_text(
             f"⏳ لطفاً {e.seconds} ثانیه صبر کن و دوباره تلاش کن.",
-            chat_id=message.chat.id,
-            message_id=status_msg.message_id,
             reply_markup=main_menu(),
             parse_mode='HTML'
         )
     except Exception as e:
-        logger.error(f"Error connecting: {e}")
-        bot.edit_message_text(
+        logger.error(f"Error: {e}")
+        await status_msg.edit_text(
             f"❌ خطا در اتصال!\n\n{str(e)}",
-            chat_id=message.chat.id,
-            message_id=status_msg.message_id,
             reply_markup=main_menu(),
             parse_mode='HTML'
         )
 
-def verify_code(message, client, user_id):
-    code_input = message.text.strip()
+async def handle_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    
+    if user_id not in user_states or user_states[user_id] != "waiting_code":
+        return
+    
+    code_input = update.message.text.strip()
     code = code_input.replace('.', '').replace('،', '').replace(' ', '').strip()
     
     if not code.isdigit() or len(code) != 5:
-        bot.send_message(
-            message.chat.id,
-            "❌ کد باید ۵ رقم باشه! لطفاً کد رو به صورت ۱.۲.۳.۴.۵ وارد کن:\n"
-            "مثال: <code>12345</code> یا <code>1.2.3.4.5</code>",
+        await update.message.reply_text(
+            "❌ کد باید ۵ رقم باشه! مثال: <code>12345</code> یا <code>1.2.3.4.5</code>",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
-        bot.register_next_step_handler(message, verify_code, client, user_id)
         return
     
-    status_msg = bot.send_message(
-        message.chat.id,
+    status_msg = await update.message.reply_text(
         "⏳ در حال تایید کد...",
         parse_mode='HTML'
     )
     
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    
-    try:
-        loop.run_until_complete(verify_code_async(message, client, user_id, code, status_msg, loop))
-    except Exception as e:
-        logger.error(f"Error: {e}")
-        bot.edit_message_text(
-            f"❌ خطا در تایید کد!\n\n{str(e)}",
-            chat_id=message.chat.id,
-            message_id=status_msg.message_id,
+    client = user_temp.get(user_id, {}).get('client')
+    if not client:
+        await status_msg.edit_text(
+            "❌ خطا در اتصال! لطفاً دوباره تلاش کن.",
             reply_markup=main_menu(),
             parse_mode='HTML'
         )
-    finally:
-        loop.close()
-
-async def verify_code_async(message, client, user_id, code, status_msg, loop):
+        return
+    
     try:
         await client.sign_in(code=code)
-        await get_account_info(message, client, user_id, status_msg)
+        await get_account_info(update, client, user_id, status_msg)
         
     except SessionPasswordNeededError:
-        bot.edit_message_text(
+        user_states[user_id] = "waiting_password"
+        await status_msg.edit_text(
             "🔑 <b>این اکانت پسورد (Two-Factor) داره!</b>\n\n"
             "لطفاً پسورد اکانت رو وارد کن:",
-            chat_id=message.chat.id,
-            message_id=status_msg.message_id,
             reply_markup=back_button(),
             parse_mode='HTML'
         )
-        bot.register_next_step_handler(message, process_password, client, user_id)
         
     except PhoneCodeExpiredError:
-        bot.edit_message_text(
-            "❌ کد تایید منقضی شده!\n\n"
-            "در حال ارسال کد جدید...",
-            chat_id=message.chat.id,
-            message_id=status_msg.message_id,
+        await status_msg.edit_text(
+            "❌ کد تایید منقضی شده!\n\nدر حال ارسال کد جدید...",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
         try:
             phone = user_temp.get(user_id, {}).get("phone")
             await client.send_code_request(phone)
-            bot.send_message(
-                message.chat.id,
+            await update.message.reply_text(
                 "📨 کد جدید ارسال شد! لطفاً وارد کن:",
                 reply_markup=back_button(),
                 parse_mode='HTML'
             )
-            bot.register_next_step_handler(message, verify_code, client, user_id)
+            user_states[user_id] = "waiting_code"
         except Exception as e:
-            bot.edit_message_text(
+            await status_msg.edit_text(
                 f"❌ خطا در ارسال کد جدید: {str(e)}",
-                chat_id=message.chat.id,
-                message_id=status_msg.message_id,
                 reply_markup=main_menu(),
                 parse_mode='HTML'
             )
         
     except PhoneCodeInvalidError:
-        bot.edit_message_text(
-            "❌ کد اشتباه!\n\n"
-            "لطفاً کد رو دقیق وارد کن.\n"
-            "کد رو به صورت <b>۱.۲.۳.۴.۵</b> وارد کن.",
-            chat_id=message.chat.id,
-            message_id=status_msg.message_id,
+        await status_msg.edit_text(
+            "❌ کد اشتباه!\n\nلطفاً کد رو دقیق وارد کن.",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
-        bot.register_next_step_handler(message, verify_code, client, user_id)
+        user_states[user_id] = "waiting_code"
         
     except Exception as e:
-        logger.error(f"Error verifying: {e}")
-        bot.edit_message_text(
+        logger.error(f"Error: {e}")
+        await status_msg.edit_text(
             f"❌ خطا در تایید کد!\n\n{str(e)}",
-            chat_id=message.chat.id,
-            message_id=status_msg.message_id,
             reply_markup=main_menu(),
             parse_mode='HTML'
         )
 
-def process_password(message, client, user_id):
-    password = message.text.strip()
+async def handle_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    
+    if user_id not in user_states or user_states[user_id] != "waiting_password":
+        return
+    
+    password = update.message.text.strip()
     
     if len(password) < 4:
-        bot.send_message(
-            message.chat.id,
+        await update.message.reply_text(
             "❌ پسورد حداقل ۴ کاراکتر! دوباره وارد کن:",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
-        bot.register_next_step_handler(message, process_password, client, user_id)
         return
     
-    status_msg = bot.send_message(
-        message.chat.id,
+    status_msg = await update.message.reply_text(
         "⏳ در حال تایید پسورد...",
         parse_mode='HTML'
     )
     
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    
-    try:
-        loop.run_until_complete(verify_password_async(message, client, user_id, password, status_msg, loop))
-    except Exception as e:
-        logger.error(f"Error: {e}")
-        bot.edit_message_text(
-            f"❌ خطا در تایید پسورد!\n\n{str(e)}",
-            chat_id=message.chat.id,
-            message_id=status_msg.message_id,
+    client = user_temp.get(user_id, {}).get('client')
+    if not client:
+        await status_msg.edit_text(
+            "❌ خطا در اتصال! لطفاً دوباره تلاش کن.",
             reply_markup=main_menu(),
             parse_mode='HTML'
         )
-    finally:
-        loop.close()
-
-async def verify_password_async(message, client, user_id, password, status_msg, loop):
+        return
+    
     try:
         await client.sign_in(password=password)
-        await get_account_info(message, client, user_id, status_msg)
+        await get_account_info(update, client, user_id, status_msg)
     except Exception as e:
-        logger.error(f"Error verifying password: {e}")
-        bot.edit_message_text(
+        logger.error(f"Error: {e}")
+        await status_msg.edit_text(
             f"❌ پسورد اشتباه!\n\n{str(e)}",
-            chat_id=message.chat.id,
-            message_id=status_msg.message_id,
             reply_markup=back_button(),
             parse_mode='HTML'
         )
 
-async def get_account_info(message, client, user_id, status_msg):
+async def get_account_info(update, client, user_id, status_msg):
     try:
         me = await client.get_me()
         
@@ -483,120 +419,116 @@ async def get_account_info(message, client, user_id, status_msg):
         }
         
         if any(a.get('user_id') == me.id for a in data["accounts"]):
-            bot.edit_message_text(
+            await status_msg.edit_text(
                 "⚠️ این اکانت قبلاً ثبت شده!",
-                chat_id=message.chat.id,
-                message_id=status_msg.message_id,
                 reply_markup=main_menu(),
                 parse_mode='HTML'
             )
             if user_id in user_temp:
                 del user_temp[user_id]
+            if user_id in user_states:
+                del user_states[user_id]
             await client.disconnect()
             return
         
         data["accounts"].append(account)
         save_data(data)
         
-        bot.edit_message_text(
+        await status_msg.edit_text(
             f"✅ <b>اکانت با موفقیت اضافه شد!</b>\n\n"
             f"📱 شماره: <code>{account['phone']}</code>\n"
             f"👤 نام: {account['first_name']} {account.get('last_name', '')}\n"
             f"🆔 آیدی: <code>{account['user_id']}</code>\n\n"
             "🎉 اکانت آماده استفاده است!",
-            chat_id=message.chat.id,
-            message_id=status_msg.message_id,
             reply_markup=main_menu(),
             parse_mode='HTML'
         )
         
         if user_id in user_temp:
             del user_temp[user_id]
+        if user_id in user_states:
+            del user_states[user_id]
         
         await client.disconnect()
         
     except Exception as e:
-        logger.error(f"Error getting account: {e}")
-        bot.edit_message_text(
+        logger.error(f"Error: {e}")
+        await status_msg.edit_text(
             f"❌ خطا: {str(e)}",
-            chat_id=message.chat.id,
-            message_id=status_msg.message_id,
             reply_markup=main_menu(),
             parse_mode='HTML'
         )
 
-# ==================== ادامه کد (لیست اکانت‌ها، ریپورت، مدیریت ادمین) ====================
+# ==================== لیست اکانت‌ها ====================
 
-@bot.callback_query_handler(func=lambda call: call.data == "list_accounts")
-def list_accounts(call):
+async def list_accounts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
     if not data["accounts"]:
-        bot.send_message(
-            call.message.chat.id,
+        await query.edit_message_text(
             "📭 <b>هیچ اکانتی ثبت نشده!</b>\n\n"
             "برای افزودن اکانت، روی دکمه <b>'➕ افزودن اکانت'</b> کلیک کن.",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
-        bot.answer_callback_query(call.id)
         return
     
     text = "📋 <b>لیست اکانت‌های فعال:</b>\n\n"
     for i, acc in enumerate(data["accounts"], 1):
-        status = "✅" if acc.get('is_active', True) else "❌"
-        text += f"{status} <b>{i}.</b> 📱 <code>{acc.get('phone', 'نامشخص')}</code>\n"
+        text += f"✅ <b>{i}.</b> 📱 <code>{acc.get('phone', 'نامشخص')}</code>\n"
         text += f"   👤 {acc.get('first_name', '')} {acc.get('last_name', '')}\n"
         if acc.get('username'):
             text += f"   🆔 @{acc.get('username')}\n"
-        text += f"   📅 {acc.get('created_at', 'نامشخص')[:10]}\n"
         text += "─" * 25 + "\n"
     
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("🗑 حذف اکانت", callback_data="delete_account_menu"))
-    markup.add(InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_menu"))
+    keyboard = [
+        [InlineKeyboardButton("🗑 حذف اکانت", callback_data="delete_account_menu")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_menu")]
+    ]
     
-    bot.send_message(
-        call.message.chat.id,
+    await query.edit_message_text(
         text,
-        reply_markup=markup,
+        reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode='HTML'
     )
-    bot.answer_callback_query(call.id)
 
-@bot.callback_query_handler(func=lambda call: call.data == "delete_account_menu")
-def delete_account_menu(call):
+# ==================== حذف اکانت ====================
+
+async def delete_account_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
     if not data["accounts"]:
-        bot.send_message(
-            call.message.chat.id,
+        await query.edit_message_text(
             "📭 اکانتی برای حذف نیست!",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
-        bot.answer_callback_query(call.id)
         return
     
-    markup = InlineKeyboardMarkup(row_width=1)
+    keyboard = []
     for i, acc in enumerate(data["accounts"]):
-        markup.add(InlineKeyboardButton(
+        keyboard.append([InlineKeyboardButton(
             f"🗑 {acc.get('phone', 'نامشخص')}",
             callback_data=f"delete_acc_{i}"
-        ))
-    markup.add(InlineKeyboardButton("🔙 بازگشت", callback_data="list_accounts"))
+        )])
+    keyboard.append([InlineKeyboardButton("🔙 بازگشت", callback_data="list_accounts")])
     
-    bot.send_message(
-        call.message.chat.id,
-        "🗑 <b>انتخاب اکانت برای حذف:</b>\n\n"
-        "روی اکانت مورد نظر کلیک کن:",
-        reply_markup=markup,
+    await query.edit_message_text(
+        "🗑 <b>انتخاب اکانت برای حذف:</b>\n\nروی اکانت مورد نظر کلیک کن:",
+        reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode='HTML'
     )
-    bot.answer_callback_query(call.id)
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("delete_acc_"))
-def delete_account(call):
-    index = int(call.data.split("_")[2])
+async def delete_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    index = int(query.data.split("_")[2])
     
     if index >= len(data["accounts"]):
-        bot.answer_callback_query(call.id, "❌ یافت نشد!", show_alert=True)
+        await query.answer("❌ یافت نشد!", show_alert=True)
         return
     
     account = data["accounts"][index]
@@ -612,38 +544,33 @@ def delete_account(call):
     data["accounts"].pop(index)
     save_data(data)
     
-    bot.send_message(
-        call.message.chat.id,
+    await query.edit_message_text(
         f"✅ اکانت {phone} با موفقیت حذف شد!",
         reply_markup=back_button(),
         parse_mode='HTML'
     )
-    bot.answer_callback_query(call.id, "✅ حذف شد")
 
 # ==================== ریپورت گروهی ====================
 
-@bot.callback_query_handler(func=lambda call: call.data == "report_group")
-def report_group_start(call):
-    user_id = call.from_user.id
+async def report_group_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
     
     if len(data["accounts"]) < 1:
-        bot.send_message(
-            call.message.chat.id,
+        await query.edit_message_text(
             "⚠️ <b>هیچ اکانتی ثبت نشده!</b>\n\n"
-            "برای ریپورت گروهی، حداقل ۱ اکانت نیاز داری.\n"
-            "اول روی <b>'➕ افزودن اکانت'</b> کلیک کن.",
+            "برای ریپورت گروهی، حداقل ۱ اکانت نیاز داری.",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
-        bot.answer_callback_query(call.id)
         return
     
-    if user_id in report_temp:
-        del report_temp[user_id]
     report_temp[user_id] = {}
+    user_states[user_id] = "waiting_report_group"
     
-    bot.send_message(
-        call.message.chat.id,
+    await query.edit_message_text(
         "🛡 <b>ریپورت گروهی/کانال</b>\n\n"
         "برای ریپورت یک گروه یا کانال، مراحل زیر رو طی کن:\n\n"
         "1️⃣ لینک گروه یا کانال رو بفرست\n"
@@ -656,12 +583,14 @@ def report_group_start(call):
         reply_markup=back_button(),
         parse_mode='HTML'
     )
-    bot.answer_callback_query(call.id)
-    bot.register_next_step_handler(call.message, process_group_link)
 
-def process_group_link(message):
-    user_id = message.from_user.id
-    link = message.text.strip()
+async def handle_report_group_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    
+    if user_id not in user_states or user_states[user_id] != "waiting_report_group":
+        return
+    
+    link = update.message.text.strip()
     
     username = link
     if 't.me/' in link:
@@ -671,54 +600,51 @@ def process_group_link(message):
     username = username.split('/')[0]
     
     if not username:
-        bot.send_message(
-            message.chat.id,
-            "❌ لینک نامعتبر! لطفاً دوباره بفرست:\n"
-            "مثال: <code>@username</code>",
+        await update.message.reply_text(
+            "❌ لینک نامعتبر! دوباره بفرست:",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
-        bot.register_next_step_handler(message, process_group_link)
         return
     
     report_temp[user_id]["group"] = username
+    user_states[user_id] = "waiting_report_post"
     
-    bot.send_message(
-        message.chat.id,
+    await update.message.reply_text(
         f"✅ لینک گروه ثبت شد.\n\n"
         "📝 <b>لینک پست</b> رو بفرست:\n"
         "مثال: <code>https://t.me/username/123</code>",
         reply_markup=back_button(),
         parse_mode='HTML'
     )
-    bot.register_next_step_handler(message, process_post_link)
 
-def process_post_link(message):
-    user_id = message.from_user.id
-    post_link = message.text.strip()
+async def handle_report_post_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    
+    if user_id not in user_states or user_states[user_id] != "waiting_report_post":
+        return
+    
+    post_link = update.message.text.strip()
     
     if not re.match(r'https?://t\.me/[\w_]+/\d+', post_link):
-        bot.send_message(
-            message.chat.id,
-            "❌ لینک پست نامعتبر!\n"
-            "لطفاً یک لینک معتبر بفرست:\n"
-            "مثال: <code>https://t.me/username/123</code>",
+        await update.message.reply_text(
+            "❌ لینک پست نامعتبر!\nلطفاً یک لینک معتبر بفرست:",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
-        bot.register_next_step_handler(message, process_post_link)
         return
     
     report_temp[user_id]["post_link"] = post_link
     
     try:
-        msg_id_post = int(post_link.split('/')[-1])
-        report_temp[user_id]["msg_id"] = msg_id_post
+        msg_id = int(post_link.split('/')[-1])
+        report_temp[user_id]["msg_id"] = msg_id
     except:
         pass
     
-    bot.send_message(
-        message.chat.id,
+    user_states[user_id] = "waiting_report_text"
+    
+    await update.message.reply_text(
         f"✅ لینک پست ثبت شد.\n\n"
         "📄 <b>متن ریپورت</b> رو وارد کن:\n"
         "این متنی که برای گزارش ارسال میشه.\n"
@@ -726,88 +652,87 @@ def process_post_link(message):
         reply_markup=back_button(),
         parse_mode='HTML'
     )
-    bot.register_next_step_handler(message, process_report_text)
 
-def process_report_text(message):
-    user_id = message.from_user.id
-    report_text = message.text.strip()
+async def handle_report_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    
+    if user_id not in user_states or user_states[user_id] != "waiting_report_text":
+        return
+    
+    report_text = update.message.text.strip()
     
     if len(report_text) < 10:
-        bot.send_message(
-            message.chat.id,
+        await update.message.reply_text(
             "❌ متن خیلی کوتاه! حداقل ۱۰ کاراکتر وارد کن:",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
-        bot.register_next_step_handler(message, process_report_text)
         return
     
     report_temp[user_id]["text"] = report_text
+    user_states[user_id] = "waiting_report_count"
     
     available = len(data["accounts"])
     
-    bot.send_message(
-        message.chat.id,
+    await update.message.reply_text(
         f"✅ متن ریپورت ثبت شد.\n\n"
         f"📊 <b>تعداد اکانت‌های موجود:</b> {available}\n\n"
         f"🔢 <b>تعداد اکانت‌ها</b> (حداکثر {available}):",
         reply_markup=back_button(),
         parse_mode='HTML'
     )
-    bot.register_next_step_handler(message, process_account_count)
 
-def process_account_count(message):
-    user_id = message.from_user.id
+async def handle_report_count(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    
+    if user_id not in user_states or user_states[user_id] != "waiting_report_count":
+        return
     
     try:
-        count = int(message.text.strip())
+        count = int(update.message.text.strip())
         available = len(data["accounts"])
         
         if count < 1 or count > available:
-            bot.send_message(
-                message.chat.id,
+            await update.message.reply_text(
                 f"❌ تعداد باید بین ۱ تا {available} باشه! دوباره وارد کن:",
                 reply_markup=back_button(),
                 parse_mode='HTML'
             )
-            bot.register_next_step_handler(message, process_account_count)
             return
         
         report_temp[user_id]["count"] = count
+        user_states[user_id] = "waiting_report_repeat"
         
-        bot.send_message(
-            message.chat.id,
+        await update.message.reply_text(
             f"✅ تعداد اکانت‌ها: {count}\n\n"
             "🔄 <b>تعداد دفعات</b> (۱ تا ۵):\n"
             "هر اکانت چند بار ریپورت بزنه؟",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
-        bot.register_next_step_handler(message, process_repeat_count)
         
     except ValueError:
-        bot.send_message(
-            message.chat.id,
+        await update.message.reply_text(
             "❌ لطفاً یک عدد معتبر وارد کن!",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
-        bot.register_next_step_handler(message, process_account_count)
 
-def process_repeat_count(message):
-    user_id = message.from_user.id
+async def handle_report_repeat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    
+    if user_id not in user_states or user_states[user_id] != "waiting_report_repeat":
+        return
     
     try:
-        repeat = int(message.text.strip())
+        repeat = int(update.message.text.strip())
         
         if repeat < 1 or repeat > 5:
-            bot.send_message(
-                message.chat.id,
+            await update.message.reply_text(
                 "❌ تعداد دفعات باید بین ۱ تا ۵ باشه! دوباره وارد کن:",
                 reply_markup=back_button(),
                 parse_mode='HTML'
             )
-            bot.register_next_step_handler(message, process_repeat_count)
             return
         
         report_temp[user_id]["repeat"] = repeat
@@ -826,88 +751,62 @@ def process_repeat_count(message):
 ⚠️ <b>آیا از انجام این ریپورت مطمئنی؟</b>
 """
         
-        markup = InlineKeyboardMarkup()
-        markup.add(
-            InlineKeyboardButton("✅ تایید و اجرا", callback_data=f"execute_report_{user_id}"),
-            InlineKeyboardButton("❌ لغو", callback_data="cancel_report")
-        )
+        keyboard = [
+            [
+                InlineKeyboardButton("✅ تایید و اجرا", callback_data=f"execute_report_{user_id}"),
+                InlineKeyboardButton("❌ لغو", callback_data="cancel_report")
+            ]
+        ]
         
-        bot.send_message(
-            message.chat.id,
+        await update.message.reply_text(
             summary,
-            reply_markup=markup,
+            reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='HTML'
         )
         
+        if user_id in user_states:
+            del user_states[user_id]
+        
     except ValueError:
-        bot.send_message(
-            message.chat.id,
+        await update.message.reply_text(
             "❌ لطفاً یک عدد معتبر وارد کن!",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
-        bot.register_next_step_handler(message, process_repeat_count)
 
 # ==================== اجرای ریپورت ====================
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("execute_report_"))
-def execute_report(call):
-    user_id = int(call.data.split("_")[2])
+async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = int(query.data.split("_")[2])
     temp = report_temp.get(user_id, {})
     
     if not temp:
-        bot.answer_callback_query(call.id, "❌ اطلاعات یافت نشد!")
+        await query.edit_message_text(
+            "❌ اطلاعات یافت نشد!",
+            reply_markup=main_menu(),
+            parse_mode='HTML'
+        )
         return
     
-    status_msg = bot.send_message(
-        call.message.chat.id,
-        "⏳ <b>در حال اجرای ریپورت...</b>\n\n"
-        "لطفاً صبر کن...",
+    await query.edit_message_text(
+        "⏳ <b>در حال اجرای ریپورت...</b>\n\nلطفاً صبر کن...",
         parse_mode='HTML'
     )
     
-    def run():
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(execute_report_async(user_id, call.message, status_msg, loop))
-        except Exception as e:
-            logger.error(f"Error: {e}")
-            bot.edit_message_text(
-                f"❌ خطا در اجرا!\n\n{str(e)}",
-                chat_id=call.message.chat.id,
-                message_id=status_msg.message_id,
-                reply_markup=main_menu(),
-                parse_mode='HTML'
-            )
-        finally:
-            loop.close()
-    
-    thread = threading.Thread(target=run)
-    thread.daemon = True
-    thread.start()
-    
-    bot.answer_callback_query(call.id, "✅ در حال اجرا...")
-
-import threading
-
-async def execute_report_async(user_id, message, status_msg, loop):
-    temp = report_temp.get(user_id, {})
-    
     group = temp.get("group")
-    post_link = temp.get("post_link")
     text = temp.get("text", "گزارش کلاهبرداری")
     count = temp.get("count", 1)
     repeat = temp.get("repeat", 1)
-    msg_id_post = temp.get("msg_id")
+    msg_id = temp.get("msg_id")
     
     accounts = data["accounts"][:count]
     
     if len(accounts) < count:
-        bot.edit_message_text(
+        await query.edit_message_text(
             "❌ تعداد اکانت کافی نیست!",
-            chat_id=message.chat.id,
-            message_id=status_msg.message_id,
             reply_markup=main_menu(),
             parse_mode='HTML'
         )
@@ -917,18 +816,7 @@ async def execute_report_async(user_id, message, status_msg, loop):
     fail = 0
     results = []
     
-    bot.edit_message_text(
-        f"⏳ در حال ریپورت...\n\n"
-        f"📊 اکانت‌ها: {len(accounts)}\n"
-        f"🔄 دفعات: {repeat}\n"
-        f"✅ موفق: 0\n"
-        f"❌ ناموفق: 0",
-        chat_id=message.chat.id,
-        message_id=status_msg.message_id,
-        parse_mode='HTML'
-    )
-    
-    for idx, account in enumerate(accounts):
+    for account in accounts:
         try:
             session_file = account.get("session_file")
             if not session_file or not os.path.exists(session_file):
@@ -936,7 +824,7 @@ async def execute_report_async(user_id, message, status_msg, loop):
                 results.append(f"❌ {account.get('phone')}: سشن یافت نشد")
                 continue
             
-            client = TelegramClient(session_file, 0, 0, loop=loop)
+            client = TelegramClient(session_file, 0, 0)
             await client.connect()
             
             if not await client.is_user_authorized():
@@ -957,7 +845,7 @@ async def execute_report_async(user_id, message, status_msg, loop):
                 try:
                     await client(functions.messages.ReportRequest(
                         peer=entity,
-                        id=[msg_id_post],
+                        id=[msg_id],
                         reason=types.InputReportReasonSpam(),
                         message=text
                     ))
@@ -976,13 +864,11 @@ async def execute_report_async(user_id, message, status_msg, loop):
     
     report_data = {
         "group": group,
-        "post": post_link,
         "text": text,
         "accounts": count,
         "repeat": repeat,
         "success": success,
         "fail": fail,
-        "total": success + fail,
         "results": results,
         "date": datetime.now().isoformat()
     }
@@ -1007,10 +893,8 @@ async def execute_report_async(user_id, message, status_msg, loop):
     if len(results) > 5:
         result_text += f"\n\n<i>... و {len(results)-5} نتیجه دیگر</i>"
     
-    bot.edit_message_text(
+    await query.edit_message_text(
         result_text,
-        chat_id=message.chat.id,
-        message_id=status_msg.message_id,
         reply_markup=main_menu(),
         parse_mode='HTML'
     )
@@ -1020,17 +904,16 @@ async def execute_report_async(user_id, message, status_msg, loop):
 
 # ==================== گزارشات ====================
 
-@bot.callback_query_handler(func=lambda call: call.data == "reports")
-def show_reports(call):
+async def show_reports(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
     if not data["reports"]:
-        bot.send_message(
-            call.message.chat.id,
-            "📭 <b>هیچ گزارشی ثبت نشده!</b>\n\n"
-            "بعد از انجام ریپورت‌ها، گزارشات اینجا نمایش داده میشن.",
+        await query.edit_message_text(
+            "📭 <b>هیچ گزارشی ثبت نشده!</b>",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
-        bot.answer_callback_query(call.id)
         return
     
     text = "📊 <b>تاریخچه ریپورت‌ها:</b>\n\n"
@@ -1041,60 +924,60 @@ def show_reports(call):
         text += f"   📅 {r.get('date', '')[:10]}\n"
         text += "─" * 25 + "\n"
     
-    if len(data["reports"]) > 5:
-        text += f"\n<i>نمایش ۵ گزارش آخر از {len(data['reports'])} گزارش</i>"
-    
-    bot.send_message(
-        call.message.chat.id,
+    await query.edit_message_text(
         text,
         reply_markup=back_button(),
         parse_mode='HTML'
     )
-    bot.answer_callback_query(call.id)
 
 # ==================== مدیریت ادمین ====================
 
-@bot.callback_query_handler(func=lambda call: call.data == "manage_admins")
-def manage_admins(call):
-    markup = InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        InlineKeyboardButton("➕ افزودن ادمین", callback_data="add_admin"),
-        InlineKeyboardButton("🗑 حذف ادمین", callback_data="remove_admin")
-    )
-    markup.add(InlineKeyboardButton("📋 لیست ادمین‌ها", callback_data="list_admins"))
-    markup.add(InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_menu"))
+async def manage_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
     
-    bot.send_message(
-        call.message.chat.id,
+    keyboard = [
+        [
+            InlineKeyboardButton("➕ افزودن ادمین", callback_data="add_admin"),
+            InlineKeyboardButton("🗑 حذف ادمین", callback_data="remove_admin")
+        ],
+        [InlineKeyboardButton("📋 لیست ادمین‌ها", callback_data="list_admins")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_menu")]
+    ]
+    
+    await query.edit_message_text(
         "👥 <b>مدیریت ادمین‌ها</b>\n\n"
         "🔹 <b>افزودن ادمین:</b> کاربر جدید رو به لیست ادمین‌ها اضافه کن\n"
         "🔸 <b>حذف ادمین:</b> یک ادمین رو از لیست حذف کن\n"
         "📋 <b>لیست ادمین‌ها:</b> مشاهده لیست کامل ادمین‌ها",
-        reply_markup=markup,
+        reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode='HTML'
     )
-    bot.answer_callback_query(call.id)
 
-@bot.callback_query_handler(func=lambda call: call.data == "add_admin")
-def add_admin(call):
-    bot.send_message(
-        call.message.chat.id,
+async def add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    user_states[query.from_user.id] = "waiting_admin_id"
+    
+    await query.edit_message_text(
         "➕ <b>افزودن ادمین جدید</b>\n\n"
-        "🆔 <b>آیدی عددی</b> کاربر مورد نظر رو وارد کن:\n\n"
-        "⚠️ فقط کاربری که آیدی‌ش رو وارد کنی، به ربات دسترسی پیدا میکنه.",
+        "🆔 <b>آیدی عددی</b> کاربر مورد نظر رو وارد کن:",
         reply_markup=back_button(),
         parse_mode='HTML'
     )
-    bot.answer_callback_query(call.id)
-    bot.register_next_step_handler(call.message, process_add_admin)
 
-def process_add_admin(message):
+async def handle_add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    
+    if user_id not in user_states or user_states[user_id] != "waiting_admin_id":
+        return
+    
     try:
-        admin_id = int(message.text.strip())
+        admin_id = int(update.message.text.strip())
         
         if admin_id in data["admins"]:
-            bot.send_message(
-                message.chat.id,
+            await update.message.reply_text(
                 "⚠️ این کاربر قبلاً ادمین هست!",
                 reply_markup=main_menu(),
                 parse_mode='HTML'
@@ -1102,8 +985,7 @@ def process_add_admin(message):
             return
         
         if admin_id in ALLOWED_USERS:
-            bot.send_message(
-                message.chat.id,
+            await update.message.reply_text(
                 "⚠️ این کاربر در لیست اصلی هست!",
                 reply_markup=main_menu(),
                 parse_mode='HTML'
@@ -1113,80 +995,69 @@ def process_add_admin(message):
         data["admins"].append(admin_id)
         save_data(data)
         
-        bot.send_message(
-            message.chat.id,
+        await update.message.reply_text(
             f"✅ ادمین <code>{admin_id}</code> با موفقیت اضافه شد!",
             reply_markup=main_menu(),
             parse_mode='HTML'
         )
         
-        try:
-            bot.send_message(
-                admin_id,
-                "🎉 شما به عنوان ادمین به ربات اضافه شدید!\n"
-                "حالا می‌تونی از تمام امکانات ربات استفاده کنی.",
-                parse_mode='HTML'
-            )
-        except:
-            pass
+        del user_states[user_id]
             
     except ValueError:
-        bot.send_message(
-            message.chat.id,
+        await update.message.reply_text(
             "❌ لطفاً یک آیدی عددی معتبر وارد کن!",
             reply_markup=main_menu(),
             parse_mode='HTML'
         )
 
-@bot.callback_query_handler(func=lambda call: call.data == "remove_admin")
-def remove_admin(call):
+async def remove_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
     if not data["admins"]:
-        bot.send_message(
-            call.message.chat.id,
+        await query.edit_message_text(
             "📭 هیچ ادمینی ثبت نشده!",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
-        bot.answer_callback_query(call.id)
         return
     
-    markup = InlineKeyboardMarkup(row_width=1)
+    keyboard = []
     for admin in data["admins"]:
-        markup.add(InlineKeyboardButton(
+        keyboard.append([InlineKeyboardButton(
             f"🗑 {admin}",
             callback_data=f"remove_adm_{admin}"
-        ))
-    markup.add(InlineKeyboardButton("🔙 بازگشت", callback_data="manage_admins"))
+        )])
+    keyboard.append([InlineKeyboardButton("🔙 بازگشت", callback_data="manage_admins")])
     
-    bot.send_message(
-        call.message.chat.id,
-        "🗑 <b>انتخاب ادمین برای حذف:</b>\n\n"
-        "روی ادمین مورد نظر کلیک کن:",
-        reply_markup=markup,
+    await query.edit_message_text(
+        "🗑 <b>انتخاب ادمین برای حذف:</b>",
+        reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode='HTML'
     )
-    bot.answer_callback_query(call.id)
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("remove_adm_"))
-def remove_admin_confirm(call):
-    admin_id = int(call.data.split("_")[2])
+async def remove_admin_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    admin_id = int(query.data.split("_")[2])
     
     if admin_id in data["admins"]:
         data["admins"].remove(admin_id)
         save_data(data)
         
-        bot.send_message(
-            call.message.chat.id,
+        await query.edit_message_text(
             f"✅ ادمین <code>{admin_id}</code> حذف شد!",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
-        bot.answer_callback_query(call.id, "✅ حذف شد")
     else:
-        bot.answer_callback_query(call.id, "❌ یافت نشد!", show_alert=True)
+        await query.answer("❌ یافت نشد!", show_alert=True)
 
-@bot.callback_query_handler(func=lambda call: call.data == "list_admins")
-def list_admins(call):
+async def list_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
     text = "👥 <b>لیست ادمین‌ها:</b>\n\n"
     text += "🔹 <b>ادمین‌های اصلی:</b>\n"
     for uid in ALLOWED_USERS:
@@ -1199,22 +1070,21 @@ def list_admins(call):
     else:
         text += "\n📭 <i>هیچ ادمین اضافه‌ای ثبت نشده.</i>"
     
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("🔙 بازگشت", callback_data="manage_admins"))
+    keyboard = [[InlineKeyboardButton("🔙 بازگشت", callback_data="manage_admins")]]
     
-    bot.send_message(
-        call.message.chat.id,
+    await query.edit_message_text(
         text,
-        reply_markup=markup,
+        reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode='HTML'
     )
-    bot.answer_callback_query(call.id)
 
 # ==================== راهنما ====================
 
-@bot.callback_query_handler(func=lambda call: call.data == "help")
-def help_menu(call):
-    help_text = """
+async def help_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    text = """
 ❓ <b>راهنمای کامل ربات</b>
 
 <b>🛡 ریپورت گروهی:</b>
@@ -1240,44 +1110,107 @@ def help_menu(call):
 • کد تایید رو به صورت ۱.۲.۳.۴.۵ وارد کن
 """
     
-    bot.send_message(
-        call.message.chat.id,
-        help_text,
+    await query.edit_message_text(
+        text,
         reply_markup=back_button(),
         parse_mode='HTML'
     )
-    bot.answer_callback_query(call.id)
 
 # ==================== دکمه‌های عمومی ====================
 
-@bot.callback_query_handler(func=lambda call: call.data == "back_to_menu")
-def back_to_menu(call):
-    bot.send_message(
-        call.message.chat.id,
-        "🌟 <b>منوی اصلی</b>\n\n"
-        "یکی از گزینه‌های زیر رو انتخاب کن:",
+async def back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    
+    if user_id in user_states:
+        del user_states[user_id]
+    if user_id in user_temp:
+        del user_temp[user_id]
+    
+    await query.edit_message_text(
+        "🌟 <b>منوی اصلی</b>\n\nیکی از گزینه‌های زیر رو انتخاب کن:",
         reply_markup=main_menu(),
         parse_mode='HTML'
     )
-    bot.answer_callback_query(call.id)
 
-@bot.callback_query_handler(func=lambda call: call.data == "cancel_report")
-def cancel_report(call):
-    user_id = call.from_user.id
+async def cancel_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    
     if user_id in report_temp:
         del report_temp[user_id]
+    if user_id in user_states:
+        del user_states[user_id]
     
-    bot.send_message(
-        call.message.chat.id,
+    await query.edit_message_text(
         "❌ عملیات ریپورت لغو شد!",
         reply_markup=main_menu(),
         parse_mode='HTML'
     )
-    bot.answer_callback_query(call.id)
 
-# ==================== اجرا ====================
+# ==================== هندلر پیام ====================
 
-if __name__ == "__main__":
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    
+    if not is_allowed(user_id):
+        return
+    
+    if user_id in user_states:
+        state = user_states[user_id]
+        
+        if state == "waiting_phone":
+            await handle_phone(update, context)
+        elif state == "waiting_api_id":
+            await handle_api_id(update, context)
+        elif state == "waiting_api_hash":
+            await handle_api_hash(update, context)
+        elif state == "waiting_code":
+            await handle_code(update, context)
+        elif state == "waiting_password":
+            await handle_password(update, context)
+        elif state == "waiting_admin_id":
+            await handle_add_admin(update, context)
+        elif state == "waiting_report_group":
+            await handle_report_group_link(update, context)
+        elif state == "waiting_report_post":
+            await handle_report_post_link(update, context)
+        elif state == "waiting_report_text":
+            await handle_report_text(update, context)
+        elif state == "waiting_report_count":
+            await handle_report_count(update, context)
+        elif state == "waiting_report_repeat":
+            await handle_report_repeat(update, context)
+
+# ==================== Main ====================
+
+def main():
+    app = Application.builder().token(TOKEN).build()
+    
+    app.add_handler(CommandHandler("start", start))
+    
+    app.add_handler(CallbackQueryHandler(add_account_start, pattern="add_account"))
+    app.add_handler(CallbackQueryHandler(list_accounts, pattern="list_accounts"))
+    app.add_handler(CallbackQueryHandler(delete_account_menu, pattern="delete_account_menu"))
+    app.add_handler(CallbackQueryHandler(delete_account, pattern="^delete_acc_"))
+    app.add_handler(CallbackQueryHandler(report_group_start, pattern="report_group"))
+    app.add_handler(CallbackQueryHandler(execute_report, pattern="^execute_report_"))
+    app.add_handler(CallbackQueryHandler(show_reports, pattern="reports"))
+    app.add_handler(CallbackQueryHandler(manage_admins, pattern="manage_admins"))
+    app.add_handler(CallbackQueryHandler(add_admin, pattern="add_admin"))
+    app.add_handler(CallbackQueryHandler(remove_admin, pattern="remove_admin"))
+    app.add_handler(CallbackQueryHandler(remove_admin_confirm, pattern="^remove_adm_"))
+    app.add_handler(CallbackQueryHandler(list_admins, pattern="list_admins"))
+    app.add_handler(CallbackQueryHandler(help_menu, pattern="help"))
+    app.add_handler(CallbackQueryHandler(back_to_menu, pattern="back_to_menu"))
+    app.add_handler(CallbackQueryHandler(cancel_report, pattern="cancel_report"))
+    
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    
     print("=" * 50)
     print("🤖 ربات مدیریت تلگرام")
     print("=" * 50)
@@ -1287,8 +1220,7 @@ if __name__ == "__main__":
     print("=" * 50)
     print("🔄 در حال اجرا...")
     
-    try:
-        bot.infinity_polling(timeout=10, long_polling_timeout=5)
-    except Exception as e:
-        logger.error(f"Error: {e}")
-        print(f"❌ خطا: {e}")
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
