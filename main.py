@@ -6,7 +6,7 @@ import json
 import logging
 from datetime import datetime
 import asyncio
-from telethon import TelegramClient
+from telethon import TelegramClient, functions, types
 from telethon.errors import (
     SessionPasswordNeededError,
     PhoneCodeInvalidError,
