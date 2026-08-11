@@ -12,7 +12,9 @@ from telethon.errors import (
     PhoneCodeInvalidError,
     PhoneNumberInvalidError,
     PhoneCodeExpiredError,
-    FloodWaitError
+    FloodWaitError,
+    ChatAdminRequiredError,
+    UserNotParticipantError
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -20,6 +22,8 @@ logger = logging.getLogger(__name__)
 
 TOKEN = "8986723154:AAH1qTObY9bo0A-csQFnSDYVcRhYr_DtsJ0"
 ALLOWED_USERS = [7803165903, 7795617350]
+REPORT_CHANNEL = "@ValkyrieReport"  # کانال گزارشات
+REPORT_CHANNEL_ID = -1004392030066  # آیدی عددی کانال
 
 DATA_FILE = "bot_data.json"
 SESSIONS_DIR = "sessions"
@@ -75,7 +79,10 @@ def main_menu():
             InlineKeyboardButton("📊 گزارشات", callback_data="reports"),
             InlineKeyboardButton("👤 مدیریت ادمین", callback_data="manage_admins")
         ],
-        [InlineKeyboardButton("❓ راهنما", callback_data="help")]
+        [
+            InlineKeyboardButton("📣 کانال گزارشات", url="https://t.me/ValkyrieReport"),
+            InlineKeyboardButton("❓ راهنما", callback_data="help")
+        ]
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -100,6 +107,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ➕ افزودن اکانت با سشن
 📋 مدیریت اکانت‌ها
 📊 مشاهده گزارشات
+📣 ارسال گزارش به کانال
 
 برای شروع یکی از گزینه‌ها رو انتخاب کن.
 """
@@ -605,6 +613,7 @@ async def handle_report_group_link(update: Update, context: ContextTypes.DEFAULT
         return
     
     report_temp[user_id]["group"] = username
+    report_temp[user_id]["group_link"] = link
     user_states[user_id] = "waiting_report_post"
     
     await update.message.reply_text(
@@ -739,7 +748,7 @@ async def handle_report_repeat(update: Update, context: ContextTypes.DEFAULT_TYP
         summary = f"""
 📋 <b>خلاصه ریپورت:</b>
 
-🎯 <b>گروه:</b> {temp.get('group', 'نامشخص')}
+🎯 <b>گروه:</b> {temp.get('group_link', 'نامشخص')}
 📝 <b>لینک پست:</b> {temp.get('post_link', 'نامشخص')}
 📄 <b>متن ریپورت:</b> {temp.get('text', 'نامشخص')}
 🔢 <b>تعداد اکانت‌ها:</b> {temp.get('count', 0)}
@@ -794,7 +803,8 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
     group = temp.get("group")
-    text = temp.get("text", "گزارش کلاهبرداری")
+    group_link = temp.get("group_link")
+    text = temp.get("text", "گزارش کلاهبرداری و اسکم")
     count = temp.get("count", 1)
     repeat = temp.get("repeat", 1)
     msg_id = temp.get("msg_id")
@@ -812,7 +822,48 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     success = 0
     fail = 0
     results = []
+    join_results = []
     
+    # مرحله 1: جوین شدن همه اکانت‌ها
+    for account in accounts:
+        try:
+            session_file = account.get("session_file")
+            if not session_file or not os.path.exists(session_file):
+                join_results.append(f"❌ {account.get('phone')}: سشن یافت نشد")
+                continue
+            
+            client = TelegramClient(session_file, 0, 0)
+            await client.connect()
+            
+            if not await client.is_user_authorized():
+                join_results.append(f"❌ {account.get('phone')}: احراز نشده")
+                await client.disconnect()
+                continue
+            
+            try:
+                # جوین شدن به گروه/کانال
+                entity = await client.get_entity(f"@{group}")
+                await client(functions.channels.JoinChannelRequest(entity))
+                join_results.append(f"✅ {account.get('phone')}: جوین شد")
+                await asyncio.sleep(2)
+            except UserNotParticipantError:
+                join_results.append(f"⚠️ {account.get('phone')}: در گروه نیست، تلاش برای جوین...")
+                try:
+                    entity = await client.get_entity(f"@{group}")
+                    await client(functions.channels.JoinChannelRequest(entity))
+                    join_results.append(f"✅ {account.get('phone')}: جوین شد")
+                    await asyncio.sleep(2)
+                except Exception as e:
+                    join_results.append(f"❌ {account.get('phone')}: خطا در جوین - {str(e)}")
+            except Exception as e:
+                join_results.append(f"❌ {account.get('phone')}: خطا در جوین - {str(e)}")
+            
+            await client.disconnect()
+            
+        except Exception as e:
+            join_results.append(f"❌ {account.get('phone')}: خطا")
+    
+    # مرحله 2: انجام ریپورت
     for account in accounts:
         try:
             session_file = account.get("session_file")
@@ -840,6 +891,7 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             for i in range(repeat):
                 try:
+                    # ریپورت اسکم و کلاهبرداری
                     await client(functions.messages.ReportRequest(
                         peer=entity,
                         id=[msg_id],
@@ -847,48 +899,62 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         message=text
                     ))
                     success += 1
-                    results.append(f"✅ {account.get('phone')}: موفق {i+1}")
+                    results.append(f"✅ {account.get('phone')}: ریپورت {i+1} موفق")
                     await asyncio.sleep(1.5)
-                except:
+                except Exception as e:
                     fail += 1
-                    results.append(f"❌ {account.get('phone')}: خطا {i+1}")
+                    results.append(f"❌ {account.get('phone')}: خطا در ریپورت {i+1} - {str(e)}")
             
             await client.disconnect()
             
-        except:
+        except Exception as e:
             fail += 1
-            results.append(f"❌ {account.get('phone')}: خطا")
+            results.append(f"❌ {account.get('phone')}: خطا - {str(e)}")
     
+    # ثبت گزارش
     report_data = {
         "group": group,
+        "group_link": group_link,
         "text": text,
         "accounts": count,
         "repeat": repeat,
         "success": success,
         "fail": fail,
+        "total": success + fail,
+        "join_results": join_results,
         "results": results,
-        "date": datetime.now().isoformat()
+        "date": datetime.now().isoformat(),
+        "user_id": user_id
     }
     
     data["reports"].append(report_data)
     save_data(data)
     
+    # نتیجه برای کاربر
     result_text = f"""
 📊 <b>نتیجه ریپورت:</b>
 
-🎯 گروه: {group}
-✅ موفق: {success}
-❌ ناموفق: {fail}
+🎯 گروه: {group_link}
+✅ ریپورت موفق: {success}
+❌ ریپورت ناموفق: {fail}
 📋 مجموع: {success + fail}
 
-📋 <b>جزئیات:</b>
+📋 <b>وضعیت جوین:</b>
 """
     
-    for r in results[:5]:
+    for jr in join_results[:3]:
+        result_text += f"\n{jr}"
+    
+    if len(join_results) > 3:
+        result_text += f"\n... {len(join_results)-3} نتیجه دیگر"
+    
+    result_text += f"\n\n📋 <b>نتیجه ریپورت:</b>"
+    
+    for r in results[:3]:
         result_text += f"\n{r}"
     
-    if len(results) > 5:
-        result_text += f"\n\n<i>... و {len(results)-5} نتیجه دیگر</i>"
+    if len(results) > 3:
+        result_text += f"\n... {len(results)-3} نتیجه دیگر"
     
     await query.edit_message_text(
         result_text,
@@ -896,8 +962,55 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='HTML'
     )
     
+    # ارسال گزارش کامل به کانال
+    await send_report_to_channel(context, report_data)
+    
     if user_id in report_temp:
         del report_temp[user_id]
+
+# ==================== ارسال گزارش به کانال ====================
+
+async def send_report_to_channel(context, report_data):
+    try:
+        text = f"""
+📊 <b>گزارش جدید ریپورت</b>
+
+🎯 <b>گروه/کانال:</b> {report_data.get('group_link', 'نامشخص')}
+📝 <b>متن ریپورت:</b> {report_data.get('text', 'نامشخص')}
+🔢 <b>تعداد اکانت‌ها:</b> {report_data.get('accounts', 0)}
+🔄 <b>تعداد دفعات:</b> {report_data.get('repeat', 0)}
+✅ <b>موفق:</b> {report_data.get('success', 0)}
+❌ <b>ناموفق:</b> {report_data.get('fail', 0)}
+📋 <b>مجموع:</b> {report_data.get('total', 0)}
+📅 <b>تاریخ:</b> {report_data.get('date', '')[:19]}
+
+<b>📋 جزئیات جوین:</b>
+"""
+        
+        for jr in report_data.get('join_results', [])[:5]:
+            text += f"\n{jr}"
+        
+        if len(report_data.get('join_results', [])) > 5:
+            text += f"\n... {len(report_data.get('join_results', []))-5} نتیجه دیگر"
+        
+        text += f"\n\n<b>📋 جزئیات ریپورت:</b>"
+        
+        for r in report_data.get('results', [])[:5]:
+            text += f"\n{r}"
+        
+        if len(report_data.get('results', [])) > 5:
+            text += f"\n... {len(report_data.get('results', []))-5} نتیجه دیگر"
+        
+        await context.bot.send_message(
+            chat_id=REPORT_CHANNEL_ID,
+            text=text,
+            parse_mode='HTML'
+        )
+        
+        logger.info(f"Report sent to channel {REPORT_CHANNEL}")
+        
+    except Exception as e:
+        logger.error(f"Error sending report to channel: {e}")
 
 # ==================== گزارشات ====================
 
@@ -1101,10 +1214,14 @@ async def help_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 <b>👤 مدیریت ادمین:</b>
 افزودن یا حذف ادمین‌های جدید
 
+<b>📣 کانال گزارشات:</b>
+مشاهده همه گزارش‌ها در کانال
+
 ⚠️ <b>نکات مهم:</b>
 • برای ریپورت حداقل ۱ اکانت نیاز دارید
 • API ID و Hash رو از my.telegram.org بگیر
 • کد تایید رو به صورت ۱.۲.۳.۴.۵ وارد کن
+• اکانت‌ها قبل از ریپورت جوین میشن
 """
     
     await query.edit_message_text(
@@ -1214,6 +1331,7 @@ def main():
     print(f"📊 اکانت‌ها: {len(data['accounts'])}")
     print(f"👥 ادمین‌ها: {len(data['admins'])}")
     print(f"📋 گزارش‌ها: {len(data['reports'])}")
+    print(f"📣 کانال گزارشات: {REPORT_CHANNEL}")
     print("=" * 50)
     print("🔄 در حال اجرا...")
     
