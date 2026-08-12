@@ -13,9 +13,9 @@ from telethon.errors import (
     PhoneNumberInvalidError,
     PhoneCodeExpiredError,
     FloodWaitError,
-    ChatAdminRequiredError,
     UserNotParticipantError
 )
+from telethon.sessions import StringSession
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -412,6 +412,9 @@ async def get_account_info(update, client, user_id, status_msg):
     try:
         me = await client.get_me()
         
+        # دریافت session string برای ذخیره
+        session_string = client.session.save()
+        
         account = {
             "phone": me.phone,
             "username": me.username,
@@ -419,6 +422,7 @@ async def get_account_info(update, client, user_id, status_msg):
             "last_name": me.last_name,
             "user_id": me.id,
             "session_file": client.session.filename,
+            "session_string": session_string,  # ذخیره session string
             "created_at": datetime.now().isoformat(),
             "is_active": True
         }
@@ -780,7 +784,7 @@ async def handle_report_repeat(update: Update, context: ContextTypes.DEFAULT_TYP
             parse_mode='HTML'
         )
 
-# ==================== اجرای ریپورت ====================
+# ==================== اجرای ریپورت (اصلاح شده) ====================
 
 async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -832,7 +836,7 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 join_results.append(f"❌ {account.get('phone')}: سشن یافت نشد")
                 continue
             
-            # استفاده از فایل سشن
+            # استفاده از فایل سشن - نیازی به API ID و Hash نیست
             client = TelegramClient(session_file, 0, 0)
             await client.connect()
             
@@ -871,7 +875,7 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 results.append(f"❌ {account.get('phone')}: سشن یافت نشد")
                 continue
             
-            # استفاده از فایل سشن
+            # استفاده از فایل سشن - نیازی به API ID و Hash نیست
             client = TelegramClient(session_file, 0, 0)
             await client.connect()
             
@@ -883,9 +887,9 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             try:
                 entity = await client.get_entity(f"@{group}")
-            except:
+            except Exception as e:
                 fail += 1
-                results.append(f"❌ {account.get('phone')}: گروه یافت نشد")
+                results.append(f"❌ {account.get('phone')}: گروه یافت نشد - {str(e)}")
                 await client.disconnect()
                 continue
             
@@ -903,6 +907,7 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 except Exception as e:
                     fail += 1
                     results.append(f"❌ {account.get('phone')}: خطا در ریپورت {i+1} - {str(e)}")
+                    await asyncio.sleep(1)
             
             await client.disconnect()
             
