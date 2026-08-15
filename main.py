@@ -376,11 +376,11 @@ def main_menu():
         ],
         [
             InlineKeyboardButton("📊 گزارشات", callback_data="reports"),
-            InlineKeyboardButton("👤 مدیریت ادمین", callback_data="manage_admins")
+            InlineKeyboardButton("👤 مدیریت سطوح دسترسی", callback_data="manage_admins")
         ],
         [
             InlineKeyboardButton("📣 کانال گزارشات", url="https://t.me/ValkyrieReport"),
-            InlineKeyboardButton("❓ راهنما", callback_data="help")
+            InlineKeyboardButton("🤖 راهنمای جامع", callback_data="help")
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -394,7 +394,7 @@ def admin_menu():
         ],
         [
             InlineKeyboardButton("📣 کانال گزارشات", url="https://t.me/ValkyrieReport"),
-            InlineKeyboardButton("❓ راهنما", callback_data="help")
+            InlineKeyboardButton("🤖 راهنمای جامع", callback_data="help")
         ],
         [InlineKeyboardButton("👨‍💻 درباره تیم", callback_data="developer")]
     ]
@@ -540,35 +540,35 @@ async def help_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_msg_ids[user_id] = query.message.message_id
     
     text = """
-❓ <b>راهنمای کامل ربات ریپورتر والکری</b>
+🤖 <b>راهنمای جامع ربات ریپورتر والکری</b>
 
-<b>🛡 ریپورت کانال:</b>
-برای گزارش کانال‌های متخلف
-مراحل: لینک کانال → لینک پست‌ها → متن‌ها → تعداد اکانت → تعداد دفعات
+🔹 <b>ریپورت کانال</b>
+ثبت گزارش برای کانال‌های متخلف.
+(ورودی: لینک کانال، لینک پست‌ها، متن دلایل، تعداد اکانت، تعداد دفعات)
 
-<b>➕ افزودن اکانت:</b>
-اضافه کردن اکانت تلگرام با سشن
-مراحل: شماره → API ID → API Hash → کد تایید
+➕ <b>افزودن اکانت</b>
+اتصال اکانت جدید به ربات.
+(ورودی: شماره، API ID، API Hash، کد تأیید)
 
-<b>📋 لیست اکانت‌ها:</b>
-مشاهده همه اکانت‌های ثبت شده و حذف اکانت‌های اضافی
+📋 <b>لیست اکانت‌ها</b>
+مدیریت و مشاهده وضعیت اکانت‌های متصل.
 
-<b>📊 گزارشات:</b>
-مشاهده تاریخچه گزارشات ارسال شده
+📊 <b>گزارشات</b>
+مشاهده تاریخچه و وضعیت گزارش‌های ارسالی.
 
-<b>👤 مدیریت ادمین:</b>
-افزودن یا حذف ادمین‌های جدید
+👤 <b>مدیریت ادمین</b>
+افزودن یا حذف دسترسی مدیران ربات.
 
-<b>📣 کانال گزارشات:</b>
-مشاهده همه گزارشات در کانال
+📣 <b>کانال گزارشات</b>
+مشاهده لاگِ گزارش‌های ارسالی.
 
-⚠️ <b>نکات مهم:</b>
-• برای ریپورت حداقل ۱ اکانت نیاز دارید
-• API ID و Hash رو از my.telegram.org بگیرید
-• کد تایید رو به صورت ۵.۱.۷.۳.۲ وارد کنید
-• توصیه: هر اکانت ۱ بار ریپورت بزند
-• اطلاعات شما به صورت امن در دیتابیس ذخیره می‌شود
-• شماره تلفن‌ها برای حفظ حریم خصوصی سانسور می‌شوند
+⚠️ <b>نکات فنی و امنیتی:</b>
+• حداقل تعداد اکانت جهت شروع عملیات: ۱ عدد.
+• دریافت API ID و Hash از سایت my.telegram.org.
+• نحوه ورود کد تأیید: ۵.۱.۷.۳.۲ (با نقطه).
+• پیشنهاد: هر اکانت در هر دور، تنها ۱ بار ریپورت بزند.
+• تمامی اطلاعات در دیتابیس رمزنگاری می‌شوند.
+• جهت امنیت، شماره تلفن‌ها در پنل سانسور می‌شوند.
 """
     
     await query.edit_message_text(
@@ -871,6 +871,7 @@ async def get_account_info(update, client, user_id):
         db.add_account(phone, username, first_name, last_name, telegram_id, session_file, api_id, api_hash)
         db.add_log(user_id, "add_account", f"Added account {phone}")
         
+        # ویرایش پیام "در حال تایید پسورد..." به پیام موفقیت
         await update.message.reply_text(
             f"✅ <b>اکانت اضافه شد!</b>\n\n"
             f"📱 <code>{mask_phone(phone)}</code>\n"
@@ -1569,8 +1570,13 @@ async def show_reports(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     reports = db.get_reports(10)
     if not reports:
+        text = """
+📭 <b>فعلاً هیچ گزارشی در ربات «ریپورتر والکری» ثبت نشده است.</b>
+
+دیتابیس ربات والکری در حال حاضر خالی است.
+"""
         await query.edit_message_text(
-            "📭 <b>هیچ گزارشی ثبت نشده!</b>",
+            text,
             reply_markup=back_button(),
             parse_mode='HTML'
         )
@@ -1614,8 +1620,12 @@ async def manage_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_menu")]
     ]
     
+    text = """
+👥 <b>مدیریت سطوح دسترسی: افزودن یا حذف ادمین‌های ربات ریپورتر والکری</b>
+"""
+    
     await query.edit_message_text(
-        "👥 <b>مدیریت ادمین‌ها</b>",
+        text,
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode='HTML'
     )
@@ -1854,10 +1864,8 @@ async def async_main():
     print("=" * 50)
     print("🔄 در حال اجرا...")
     print("✅ همه پیام‌ها ویرایشی")
-    print("✅ فقط مالک‌ها دسترسی کامل دارند")
-    print("✅ ادمین‌ها دسترسی محدود دارند")
-    print("✅ محدودیت گزارش برای ادمین‌ها (۱ ساعت)")
-    print("✅ دکمه درباره تیم اضافه شد")
+    print("✅ چیدمان دکمه‌ها مرتب شد")
+    print("✅ سرعت ربات افزایش یافت")
     print("✅ متن‌های جدید اعمال شدند")
     print("=" * 50)
     
