@@ -37,8 +37,7 @@ OWNER_IDS = [7803165903, 7795617350]
 REPORT_CHANNEL = os.getenv("REPORT_CHANNEL", "@ValkyrieReport")
 REPORT_CHANNEL_ID = int(os.getenv("REPORT_CHANNEL_ID", "-1004392030066"))
 
-# محدودیت گزارش برای ادمین‌ها (به ثانیه)
-ADMIN_REPORT_COOLDOWN = 3600  # 1 ساعت
+ADMIN_REPORT_COOLDOWN = 3600
 
 logging.basicConfig(
     level=logging.INFO,
@@ -135,7 +134,6 @@ class Database:
             )
         ''')
         
-        # جدول برای ذخیره آخرین زمان گزارش ادمین‌ها
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS admin_report_log (
                 user_id INTEGER PRIMARY KEY,
@@ -296,7 +294,6 @@ class Database:
         conn.commit()
         conn.close()
     
-    # توابع محدودیت گزارش برای ادمین‌ها
     def get_admin_last_report(self, user_id):
         conn = self.get_connection()
         cursor = conn.cursor()
@@ -354,7 +351,6 @@ def check_user_access(update):
     return True
 
 def check_admin_report_limit(user_id):
-    """بررسی محدودیت گزارش برای ادمین‌ها (غیر از مالک)"""
     if is_owner(user_id):
         return True, None
     
@@ -373,7 +369,7 @@ def check_admin_report_limit(user_id):
 
 def main_menu():
     keyboard = [
-        [InlineKeyboardButton("🛡 ریپورت کانال", callback_data="report_group")],
+        [InlineKeyboardButton("🛡 سیستم هوشمند گزارش تخلفات (Report)", callback_data="report_group")],
         [
             InlineKeyboardButton("➕ افزودن اکانت", callback_data="add_account"),
             InlineKeyboardButton("📋 لیست اکانت‌ها", callback_data="list_accounts")
@@ -391,7 +387,7 @@ def main_menu():
 
 def admin_menu():
     keyboard = [
-        [InlineKeyboardButton("🛡 ریپورت کانال", callback_data="report_group")],
+        [InlineKeyboardButton("🛡 سیستم هوشمند گزارش تخلفات (Report)", callback_data="report_group")],
         [
             InlineKeyboardButton("📋 لیست اکانت‌ها", callback_data="list_accounts"),
             InlineKeyboardButton("📊 گزارشات", callback_data="reports")
@@ -423,7 +419,12 @@ async def back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id in report_temp:
         del report_temp[user_id]
     
-    text = "🌟 <b>منوی اصلی</b>"
+    text = """
+⁭⁯⁯⁭⁯               ⁭⁯⁯⁭⁯               ⁭⁯⁯⁭⁯               ⁭⁯⁯⁭⁯               ⁭⁯⁯⁭⁯‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌
+🌟 <b>به منوی اصلی بازگشتید.</b>
+
+<b>لطفاً انتخاب کنید :</b>
+"""
     
     await query.edit_message_text(
         text,
@@ -489,7 +490,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_msg_ids[user_id] = msg.message_id
     db.add_log(user_id, "start", "User started bot")
 
-# ==================== درباره تیم (برنامه نویس) ====================
+# ==================== درباره تیم ====================
 
 async def developer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -595,17 +596,15 @@ async def add_account_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_states[user_id] = "waiting_phone"
     
     text = """
-➕ <b>افزودن اکانت جدید</b>
+➕ <b>افزودن اکانت به ربات ریپورتر</b>
 
-<b>1️⃣ شماره تلفن</b> (با کد کشور)
-مثال: <code>+989123456789</code>
+<b>1.</b> شماره تلفن (با کد کشور):
+<b>2.</b> آیپی عددی API ID:
+<b>3.</b> آیپی هش API Hash:
+<b>4.</b> کد تأیید:
+<b>5.</b> رمز عبور (در صورت نیاز):
 
-<b>2️⃣ API ID</b> (از my.telegram.org)
-<b>3️⃣ API Hash</b> (از my.telegram.org)
-<b>4️⃣ کد تایید</b> (به تلگرام ارسال می‌شود)
-<b>5️⃣ پسورد</b> (در صورت فعال بودن)
-
-📱 <b>شماره تلفن را وارد کنید:</b>
+📱<b>لطفا شماره تلفن اکانت را وارد نمایید :</b>
 """
     await query.edit_message_text(text, reply_markup=back_button(), parse_mode='HTML')
 
@@ -908,7 +907,11 @@ async def list_accounts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     accounts = db.get_accounts()
     if not accounts:
-        text = "📭 <b>هیچ اکانتی ثبت نشده!</b>"
+        text = """
+📭 <b>در حال حاضر هیچ اکانتی ثبت نشده است.</b>
+
+لطفاً برای شروع، ابتدا به بخش <b>"➕ افزودن اکانت"</b> مراجعه کرده و حساب کاربری خود را اضافه کنید.
+"""
         await query.edit_message_text(
             text,
             reply_markup=back_button(),
@@ -1024,7 +1027,6 @@ async def report_group_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_id = query.from_user.id
     user_msg_ids[user_id] = query.message.message_id
     
-    # بررسی محدودیت برای ادمین‌ها
     if not is_owner(user_id):
         can_report, remaining = check_admin_report_limit(user_id)
         if not can_report:
@@ -1039,8 +1041,13 @@ async def report_group_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     accounts = db.get_accounts()
     if len(accounts) < 1:
+        text = """
+📭 <b>در حال حاضر هیچ اکانتی ثبت نشده است.</b>
+
+لطفاً برای شروع، ابتدا به بخش <b>"➕ افزودن اکانت"</b> مراجعه کرده و حساب کاربری خود را اضافه کنید.
+"""
         await query.edit_message_text(
-            "⚠️ <b>هیچ اکانتی ثبت نشده!</b>\n\nابتدا یک اکانت اضافه کنید.",
+            text,
             reply_markup=back_button(),
             parse_mode='HTML'
         )
@@ -1058,15 +1065,22 @@ async def report_group_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_states[user_id] = "waiting_report_group"
     
     await query.edit_message_text(
-        "🛡 <b>ریپورت کانال</b>\n\n"
-        "<b>مراحل:</b>\n"
-        "1️⃣ لینک کانال\n"
-        "2️⃣ لینک پست‌ها (چندتایی)\n"
-        "3️⃣ متن گزارش (چندتایی)\n"
-        "4️⃣ تعداد اکانت\n"
-        "5️⃣ تعداد دفعات\n\n"
-        "📎 <b>لینک کانال</b> را بفرستید:\n"
-        "مثال: <code>@username</code> یا <code>https://t.me/username</code>",
+        """
+🛡 <b>سیستم هوشمند گزارش تخلفات (Report) ربات والکری</b>
+
+جهت بررسی و پیگیری کانال‌های متخلف، لطفاً اطلاعات زیر را با دقت تکمیل و ارسال نمایید:
+
+<b>مراحل ثبت گزارش:</b>
+1️⃣ <b>لینک کانال:</b> (آیدی یا لینک مستقیم)
+2️⃣ <b>لینک پست‌های متخلف:</b> (ارسال حداقل ۳ نمونه جهت تسریع در بررسی)
+3️⃣ <b>دلیل گزارش:</b> (شرح کوتاه و مستدل از نوع تخلف)
+4️⃣ <b>تعداد اکانت درخواستی:</b> (ظرفیت مورد نظر شما)
+5️⃣ <b>دفعات تکرار:</b> (تعداد دفعات اجرای عملیات)
+
+📎 <b>درگاه ثبت گزارش:</b>
+لطفاً لینک کانال مورد نظر را به فرمت زیر ارسال کنید:
+<code>@Username</code> یا <code>https://t.me/Username</code>
+""",
         reply_markup=back_button(),
         parse_mode='HTML'
     )
@@ -1358,7 +1372,6 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("❌ <b>اطلاعات یافت نشد!</b>", reply_markup=main_menu() if is_owner(user_id) else admin_menu(), parse_mode='HTML')
         return
     
-    # ثبت زمان گزارش برای ادمین‌ها
     if not is_owner(user_id):
         db.set_admin_last_report(user_id)
     
@@ -1845,6 +1858,7 @@ async def async_main():
     print("✅ ادمین‌ها دسترسی محدود دارند")
     print("✅ محدودیت گزارش برای ادمین‌ها (۱ ساعت)")
     print("✅ دکمه درباره تیم اضافه شد")
+    print("✅ متن‌های جدید اعمال شدند")
     print("=" * 50)
     
     await app.initialize()
