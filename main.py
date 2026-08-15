@@ -361,6 +361,46 @@ def admin_menu():
 def back_button():
     return InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_menu")]])
 
+# ==================== دکمه‌های عمومی ====================
+
+async def back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    user_msg_ids[user_id] = query.message.message_id
+    
+    if user_id in user_states:
+        del user_states[user_id]
+    if user_id in user_temp:
+        del user_temp[user_id]
+    if user_id in report_temp:
+        del report_temp[user_id]
+    
+    await query.edit_message_text(
+        "🌟 <b>منوی اصلی</b>",
+        reply_markup=main_menu() if is_owner(user_id) else admin_menu(),
+        parse_mode='HTML'
+    )
+
+async def cancel_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    user_msg_ids[user_id] = query.message.message_id
+    
+    if user_id in report_temp:
+        del report_temp[user_id]
+    if user_id in user_states:
+        del user_states[user_id]
+    
+    await query.edit_message_text(
+        "❌ لغو شد!",
+        reply_markup=main_menu() if is_owner(user_id) else admin_menu(),
+        parse_mode='HTML'
+    )
+
 # ==================== شروع ====================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -441,17 +481,6 @@ async def developer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='HTML'
     )
 
-# ==================== بقیه کدهای قبلی ====================
-# (بقیه توابع مثل قبل - add_account_start, handle_phone, handle_api_id, 
-# handle_api_hash, handle_code, handle_password, get_account_info,
-# list_accounts, delete_account_menu, delete_account,
-# report_group_start, handle_report_group_link, handle_report_post_link,
-# no_more_posts, handle_report_text, no_more_texts, handle_report_count,
-# handle_report_repeat, execute_report, send_report_to_channel,
-# show_reports, manage_admins, add_admin, handle_add_admin,
-# remove_admin, remove_admin_confirm, list_admins, help_menu,
-# back_to_menu, cancel_report, handle_message)
-
 # ==================== راهنما ====================
 
 async def help_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -503,7 +532,7 @@ async def help_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='HTML'
     )
 
-# ==================== بقیه توابع ====================
+# ==================== افزودن اکانت ====================
 
 async def add_account_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -1450,6 +1479,8 @@ async def send_report_to_channel(context, report_data):
     except Exception as e:
         logger.error(f"Error sending report to channel: {e}")
 
+# ==================== گزارشات ====================
+
 async def show_reports(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -1667,6 +1698,40 @@ async def list_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=back_button(),
         parse_mode='HTML'
     )
+
+# ==================== هندلر پیام ====================
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    
+    if not check_user_access(update):
+        return
+    
+    if user_id in user_states:
+        state = user_states[user_id]
+        
+        if state == "waiting_phone":
+            await handle_phone(update, context)
+        elif state == "waiting_api_id":
+            await handle_api_id(update, context)
+        elif state == "waiting_api_hash":
+            await handle_api_hash(update, context)
+        elif state == "waiting_code":
+            await handle_code(update, context)
+        elif state == "waiting_password":
+            await handle_password(update, context)
+        elif state == "waiting_admin_id":
+            await handle_add_admin(update, context)
+        elif state == "waiting_report_group":
+            await handle_report_group_link(update, context)
+        elif state == "waiting_report_post":
+            await handle_report_post_link(update, context)
+        elif state == "waiting_report_text":
+            await handle_report_text(update, context)
+        elif state == "waiting_report_count":
+            await handle_report_count(update, context)
+        elif state == "waiting_report_repeat":
+            await handle_report_repeat(update, context)
 
 # ==================== اجرا ====================
 
