@@ -405,7 +405,7 @@ async def handle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     phone = update.message.text.strip()
-    # حذف پیام کاربر
+    # حذف پیام کاربر (شماره)
     try:
         await update.message.delete()
     except:
@@ -551,7 +551,7 @@ async def start_connection(user_id, update, status_msg):
                 user_messages[user_id].pop()
             
             msg = await status_msg.edit_text(
-                f"📨 کد تایید ارسال شد!\n\n📱 {phone}\n\n🔑 کد ۵ رقمی رو وارد کن:",
+                f"📨 کد تایید ارسال شد!\n\n📱 {phone}\n\n🔑 کد رو به صورت <b>۵.۱.۷.۳.۲</b> وارد کن:",
                 reply_markup=back_button(),
                 parse_mode='HTML'
             )
@@ -583,7 +583,7 @@ async def handle_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if not code.isdigit() or len(code) != 5:
         msg = await update.message.reply_text(
-            "❌ کد باید ۵ رقم باشه! مثال: <code>12345</code>",
+            "❌ کد باید ۵ رقم باشه! مثال: <code>5.1.7.3.2</code>",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
@@ -1656,10 +1656,10 @@ async def help_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     text = """
-❓ <b>راهنمای ربات ریپورتر والکری</b>
+❓ <b>راهنما</b>
 
 <b>🛡 ریپورت کانال:</b>
-لینک کانال → لینک پست → متن گزارش → تعداد اکانت → تعداد دفعات
+لینک کانال → لینک پست → متن → تعداد اکانت → تعداد دفعات
 
 <b>➕ افزودن اکانت:</b>
 شماره → API ID → API Hash → کد تایید
@@ -1667,10 +1667,9 @@ async def help_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 <b>📋 مدیریت:</b>
 لیست اکانت‌ها - حذف اکانت - مدیریت ادمین
 
-⚠️ <b>نکات مهم:</b>
-• API ID و Hash رو از my.telegram.org بگیر
-• کد تایید رو به صورت ۱.۲.۳.۴.۵ وارد کن
-• هر اکانت ۱ بار ریپورت بزنه بهتره
+⚠️ <b>نکات:</b>
+• API ID و Hash از my.telegram.org
+• کد تایید: ۵.۱.۷.۳.۲
 """
     
     await query.edit_message_text(text, reply_markup=back_button(), parse_mode='HTML')
@@ -1683,19 +1682,11 @@ async def back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     user_id = query.from_user.id
     
+    # فقط پیام رو ویرایش کن، حذف نکن
     if user_id in user_states:
         del user_states[user_id]
     if user_id in user_temp:
         del user_temp[user_id]
-    if user_id in user_messages:
-        # حذف پیام‌های مرحله‌ای
-        chat_id = update.effective_chat.id
-        for msg_id in user_messages[user_id]:
-            try:
-                await context.bot.delete_message(chat_id, msg_id)
-            except:
-                pass
-        del user_messages[user_id]
     
     await query.edit_message_text(
         "🌟 <b>منوی اصلی</b>",
@@ -1800,9 +1791,10 @@ def main():
     print(f"📋 گزارش‌ها: {len(reports)}")
     print("=" * 50)
     print("🔄 در حال اجرا...")
-    print("✅ پیام‌های مرحله‌ای حذف میشن")
-    print("✅ فقط پیام نهایی باقی میمونه")
-    print("✅ اکانت‌ها جوین کانال میشن")
+    print("✅ دکمه بازگشت پیام رو حذف نمیکنه")
+    print("✅ کد تایید: ۵.۱.۷.۳.۲")
+    print("✅ متن‌ها کوتاه و توضیحی")
+    print("✅ چیدمان: ردیف1 یک دکمه | ردیف2 دو دکمه | ردیف3 یک دکمه")
     print("=" * 50)
     
     app.run_polling()
