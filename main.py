@@ -1,4 +1,3 @@
-```python
 import os
 import re
 import logging
@@ -298,7 +297,6 @@ user_msg_ids = {}
 # ==================== تابع سانسور شماره ====================
 
 def mask_phone(phone):
-    """سانسور شماره تلفن - فقط ۳ رقم اول و ۳ رقم آخر نمایش داده میشه"""
     if not phone:
         return "نامشخص"
     phone_str = str(phone)
@@ -362,24 +360,22 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 📌 <b>قابلیت‌های ربات:</b>
 🛡 <b>ریپورت کانال:</b> ارسال گزارش علیه کانال‌های متخلف با استفاده از چندین اکانت
-➕ <b>افزودن اکانت:</b> اضافه کردن اکانت‌های تلگرام با سشن (شماره، API ID، API Hash، کد تایید)
-📋 <b>لیست اکانت‌ها:</b> مشاهده و مدیریت اکانت‌های ثبت شده در سیستم
+➕ <b>افزودن اکانت:</b> اضافه کردن اکانت‌های تلگرام با سشن
+📋 <b>لیست اکانت‌ها:</b> مشاهده و مدیریت اکانت‌های ثبت شده
 📊 <b>گزارشات:</b> مشاهده تاریخچه کامل گزارشات ارسال شده
 👤 <b>مدیریت ادمین:</b> افزودن یا حذف ادمین‌های جدید
 
 <b>📌 راهنمای استفاده:</b>
-برای ریپورت یک کانال، روی دکمه <b>"🛡 ریپورت کانال"</b> کلیک کنید و مراحل را به ترتیب طی کنید.
+برای ریپورت یک کانال، روی دکمه <b>"🛡 ریپورت کانال"</b> کلیک کنید.
 برای اضافه کردن اکانت جدید، روی دکمه <b>"➕ افزودن اکانت"</b> کلیک کنید.
 
 ⚠️ <b>نکات مهم:</b>
 • برای انجام ریپورت حداقل به ۱ اکانت نیاز دارید
 • API ID و API Hash را از سایت my.telegram.org دریافت کنید
 • کد تایید را به صورت ۵.۱.۷.۳.۲ وارد کنید
-• هر اکانت فقط ۱ بار ریپورت بزند تا از محدودیت جلوگیری شود
 • شماره تلفن‌ها برای حفظ حریم خصوصی سانسور می‌شوند
 
 📣 <b>کانال گزارشات:</b>
-همه گزارشات به صورت خودکار به کانال زیر ارسال می‌شوند:
 https://t.me/ValkyrieReport
 """
     msg = await update.message.reply_text(text, reply_markup=main_menu(), parse_mode='HTML')
@@ -408,10 +404,10 @@ async def add_account_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 <b>1️⃣ شماره تلفن</b> (همراه با کد کشور)
 مثال: <code>+989123456789</code>
 
-<b>2️⃣ API ID</b> (از سایت my.telegram.org دریافت کنید)
-<b>3️⃣ API Hash</b> (از سایت my.telegram.org دریافت کنید)
+<b>2️⃣ API ID</b> (از سایت my.telegram.org)
+<b>3️⃣ API Hash</b> (از سایت my.telegram.org)
 <b>4️⃣ کد تایید</b> (به تلگرام شما ارسال می‌شود)
-<b>5️⃣ پسورد</b> (در صورت فعال بودن Two-Factor Authentication)
+<b>5️⃣ پسورد</b> (در صورت فعال بودن Two-Factor)
 
 📱 <b>لطفاً شماره تلفن</b> خود را وارد کنید:
 """
@@ -481,8 +477,7 @@ async def handle_api_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"✅ API ID با موفقیت ثبت شد.\n\n"
         "🔐 <b>مرحله بعد: وارد کردن API Hash</b>\n\n"
         "لطفاً <b>API Hash</b> خود را وارد کنید.\n"
-        "این کد را از سایت <b>my.telegram.org</b> دریافت کنید.\n"
-        "⚠️ توجه: API Hash معمولاً ۳۲ کاراکتر است.",
+        "این کد را از سایت <b>my.telegram.org</b> دریافت کنید.",
         reply_markup=back_button(),
         parse_mode='HTML'
     )
@@ -497,8 +492,7 @@ async def handle_api_hash(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(api_hash) < 20:
         await update.message.reply_text(
             "❌ API Hash نامعتبر است!\n\n"
-            "لطفاً API Hash صحیح را از سایت my.telegram.org دریافت کنید.\n"
-            "دوباره وارد کنید:",
+            "لطفاً API Hash صحیح را از سایت my.telegram.org دریافت کنید.",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
@@ -522,7 +516,7 @@ async def start_connection(user_id, update):
     api_hash = temp.get("api_hash")
     
     if not all([phone, api_id, api_hash]):
-        await update.message.reply_text("❌ اطلاعات کامل نیست! لطفاً دوباره تلاش کنید.", reply_markup=main_menu(), parse_mode='HTML')
+        await update.message.reply_text("❌ اطلاعات کامل نیست!", reply_markup=main_menu(), parse_mode='HTML')
         return
     
     try:
@@ -538,9 +532,8 @@ async def start_connection(user_id, update):
             await update.message.reply_text(
                 f"📨 <b>کد تایید با موفقیت ارسال شد!</b>\n\n"
                 f"📱 شماره: <code>{mask_phone(phone)}</code>\n\n"
-                "🔑 لطفاً کد تایید ۵ رقمی را که به تلگرام شما ارسال شده است وارد کنید.\n\n"
-                "⚠️ <b>نکته:</b> کد را به صورت <b>۵.۱.۷.۳.۲</b> وارد کنید.\n"
-                "مثال: اگر کد ۵۱۷۳۲ است، عدد ۵.۱.۷.۳.۲ را وارد کنید.",
+                "🔑 لطفاً کد تایید ۵ رقمی را وارد کنید.\n\n"
+                "⚠️ <b>نکته:</b> کد را به صورت <b>۵.۱.۷.۳.۲</b> وارد کنید.",
                 reply_markup=back_button(),
                 parse_mode='HTML'
             )
@@ -549,9 +542,9 @@ async def start_connection(user_id, update):
             await get_account_info(update, client, user_id)
             
     except PhoneNumberInvalidError:
-        await update.message.reply_text("❌ شماره وارد شده معتبر نیست! لطفاً دوباره تلاش کنید.", reply_markup=main_menu(), parse_mode='HTML')
+        await update.message.reply_text("❌ شماره وارد شده معتبر نیست!", reply_markup=main_menu(), parse_mode='HTML')
     except FloodWaitError as e:
-        await update.message.reply_text(f"⏳ لطفاً {e.seconds} ثانیه صبر کنید و دوباره تلاش کنید.", reply_markup=main_menu(), parse_mode='HTML')
+        await update.message.reply_text(f"⏳ لطفاً {e.seconds} ثانیه صبر کنید.", reply_markup=main_menu(), parse_mode='HTML')
     except Exception as e:
         logger.error(f"Connection error: {e}\n{traceback.format_exc()}")
         await update.message.reply_text(f"❌ خطا در اتصال!\n\n{str(e)}", reply_markup=main_menu(), parse_mode='HTML')
@@ -568,8 +561,7 @@ async def handle_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "❌ کد تایید نامعتبر است!\n\n"
             "کد تایید باید ۵ رقم باشد.\n"
-            "لطفاً کد را به صورت <b>۵.۱.۷.۳.۲</b> وارد کنید.\n"
-            "مثال: <code>5.1.7.3.2</code>",
+            "لطفاً کد را به صورت <b>۵.۱.۷.۳.۲</b> وارد کنید.",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
@@ -579,7 +571,7 @@ async def handle_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     client = user_temp.get(user_id, {}).get('client')
     if not client:
-        await update.message.reply_text("❌ خطا در اتصال! لطفاً دوباره تلاش کنید.", reply_markup=main_menu(), parse_mode='HTML')
+        await update.message.reply_text("❌ خطا در اتصال!", reply_markup=main_menu(), parse_mode='HTML')
         return
     
     try:
@@ -590,7 +582,6 @@ async def handle_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_states[user_id] = "waiting_password"
         await update.message.reply_text(
             "🔑 <b>این اکانت دارای رمز عبور (Two-Factor) است!</b>\n\n"
-            "⚠️ توجه: رمز عبور شما امن است و در سیستم ذخیره نمی‌شود.\n\n"
             "لطفاً رمز عبور اکانت خود را وارد کنید:",
             reply_markup=back_button(),
             parse_mode='HTML'
@@ -618,8 +609,7 @@ async def handle_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except PhoneCodeInvalidError:
         await update.message.reply_text(
             "❌ کد اشتباه است!\n\n"
-            "لطفاً کد را دقیق وارد کنید.\n"
-            "کد را به صورت <b>۵.۱.۷.۳.۲</b> وارد کنید.",
+            "لطفاً کد را دقیق وارد کنید.",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
@@ -638,8 +628,7 @@ async def handle_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if len(password) < 4:
         await update.message.reply_text(
-            "❌ رمز عبور باید حداقل ۴ کاراکتر باشد!\n\n"
-            "لطفاً رمز عبور صحیح را وارد کنید:",
+            "❌ رمز عبور باید حداقل ۴ کاراکتر باشد!",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
@@ -649,7 +638,7 @@ async def handle_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     client = user_temp.get(user_id, {}).get('client')
     if not client:
-        await update.message.reply_text("❌ خطا در اتصال! لطفاً دوباره تلاش کنید.", reply_markup=main_menu(), parse_mode='HTML')
+        await update.message.reply_text("❌ خطا در اتصال!", reply_markup=main_menu(), parse_mode='HTML')
         return
     
     try:
@@ -679,8 +668,7 @@ async def get_account_info(update, client, user_id):
         existing = db.get_account(phone)
         if existing:
             await update.message.reply_text(
-                "⚠️ این اکانت قبلاً در سیستم ثبت شده است!\n\n"
-                "لطفاً از اکانت دیگری استفاده کنید.",
+                "⚠️ این اکانت قبلاً ثبت شده است!",
                 reply_markup=main_menu(),
                 parse_mode='HTML'
             )
@@ -695,15 +683,12 @@ async def get_account_info(update, client, user_id):
         db.add_log(user_id, "add_account", f"Added account {phone}")
         
         await update.message.reply_text(
-            f"✅ <b>اکانت با موفقیت به سیستم اضافه شد!</b>\n\n"
-            f"📱 <b>شماره تلفن:</b> <code>{mask_phone(phone)}</code>\n"
+            f"✅ <b>اکانت با موفقیت اضافه شد!</b>\n\n"
+            f"📱 <b>شماره:</b> <code>{mask_phone(phone)}</code>\n"
             f"👤 <b>نام:</b> {first_name} {last_name or ''}\n"
-            f"🆔 <b>آیدی عددی:</b> <code>{telegram_id}</code>\n"
-            f"📅 <b>تاریخ ثبت:</b> {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
-            "🎉 اکانت شما با موفقیت ثبت شد و آماده استفاده است!\n\n"
-            "📌 <b>مراحل بعدی:</b>\n"
-            "• برای ریپورت کانال، روی دکمه <b>'🛡 ریپورت کانال'</b> کلیک کنید\n"
-            "• برای مشاهده اکانت‌ها، روی <b>'📋 لیست اکانت‌ها'</b> کلیک کنید",
+            f"🆔 <b>آیدی:</b> <code>{telegram_id}</code>\n"
+            f"📅 <b>تاریخ:</b> {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
+            "🎉 اکانت شما با موفقیت ثبت شد!",
             reply_markup=main_menu(),
             parse_mode='HTML'
         )
@@ -719,7 +704,7 @@ async def get_account_info(update, client, user_id):
         logger.error(f"Get account error: {e}\n{traceback.format_exc()}")
         await update.message.reply_text(f"❌ خطا: {str(e)}", reply_markup=main_menu(), parse_mode='HTML')
 
-# ==================== لیست و حذف اکانت ====================
+# ==================== لیست اکانت‌ها ====================
 
 async def list_accounts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -735,14 +720,13 @@ async def list_accounts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     accounts = db.get_accounts()
     if not accounts:
         await query.edit_message_text(
-            "📭 <b>هیچ اکانتی در سیستم ثبت نشده است!</b>\n\n"
-            "برای افزودن اکانت جدید، روی دکمه <b>'➕ افزودن اکانت'</b> کلیک کنید.",
+            "📭 <b>هیچ اکانتی ثبت نشده است!</b>",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
         return
     
-    text = "📋 <b>لیست اکانت‌های فعال در سیستم:</b>\n\n"
+    text = "📋 <b>لیست اکانت‌ها:</b>\n\n"
     for i, acc in enumerate(accounts, 1):
         status = "✅" if acc.get('is_valid', 1) else "❌"
         text += f"{status} <b>{i}.</b> 📱 <code>{mask_phone(acc['phone'])}</code>\n"
@@ -753,7 +737,7 @@ async def list_accounts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     keyboard = [
         [InlineKeyboardButton("🗑 حذف اکانت", callback_data="delete_account_menu")],
-        [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="back_to_menu")]
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_menu")]
     ]
     
     await query.edit_message_text(
@@ -788,8 +772,7 @@ async def delete_account_menu(update: Update, context: ContextTypes.DEFAULT_TYPE
     keyboard.append([InlineKeyboardButton("🔙 بازگشت", callback_data="list_accounts")])
     
     await query.edit_message_text(
-        "🗑 <b>انتخاب اکانت برای حذف:</b>\n\n"
-        "روی اکانت مورد نظر کلیک کنید تا از سیستم حذف شود.",
+        "🗑 انتخاب کنید:",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode='HTML'
     )
@@ -808,7 +791,7 @@ async def delete_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     accounts = db.get_accounts()
     if index >= len(accounts):
-        await query.answer("❌ اکانت مورد نظر یافت نشد!", show_alert=True)
+        await query.answer("❌ یافت نشد!", show_alert=True)
         return
     
     account = accounts[index]
@@ -818,7 +801,6 @@ async def delete_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if session_file and os.path.exists(session_file):
         try:
             os.remove(session_file)
-            logger.info(f"Session file deleted: {session_file}")
         except Exception as e:
             logger.error(f"Error deleting session: {e}")
     
@@ -826,7 +808,7 @@ async def delete_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db.add_log(user_id, "delete_account", f"Deleted account {phone}")
     
     await query.edit_message_text(
-        f"✅ اکانت <code>{mask_phone(phone)}</code> با موفقیت از سیستم حذف شد!",
+        f"✅ اکانت <code>{mask_phone(phone)}</code> حذف شد!",
         reply_markup=back_button(),
         parse_mode='HTML'
     )
@@ -847,9 +829,8 @@ async def report_group_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
     accounts = db.get_accounts()
     if len(accounts) < 1:
         await query.edit_message_text(
-            "⚠️ <b>هیچ اکانتی در سیستم ثبت نشده است!</b>\n\n"
-            "برای ریپورت کانال، ابتدا باید یک اکانت به سیستم اضافه کنید.\n"
-            "روی دکمه <b>'➕ افزودن اکانت'</b> کلیک کنید.",
+            "⚠️ <b>هیچ اکانتی ثبت نشده است!</b>\n\n"
+            "ابتدا یک اکانت اضافه کنید.",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
@@ -857,7 +838,7 @@ async def report_group_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     report_temp[user_id] = {
         "posts": [],
-        "report_texts": [],  # لیست متن‌های گزارش
+        "report_texts": [],
         "count": None,
         "repeat": None,
         "group": None,
@@ -867,14 +848,14 @@ async def report_group_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_states[user_id] = "waiting_report_group"
     
     await query.edit_message_text(
-        "🛡 <b>ریپورت کانال متخلف</b>\n\n"
-        "برای ارسال گزارش علیه یک کانال، مراحل زیر را به ترتیب طی کنید:\n\n"
-        "1️⃣ <b>لینک کانال:</b> لینک کانال مورد نظر را ارسال کنید\n"
-        "2️⃣ <b>لینک پست‌ها:</b> لینک پست‌های مورد نظر را ارسال کنید (می‌توانید چندین پست بفرستید)\n"
-        "3️⃣ <b>متن گزارش:</b> متن گزارش را وارد کنید (می‌توانید چندین متن بفرستید)\n"
-        "4️⃣ <b>تعداد اکانت‌ها:</b> تعداد اکانت‌ها برای ارسال گزارش را مشخص کنید\n"
-        "5️⃣ <b>تعداد دفعات:</b> تعداد دفعات ارسال گزارش را تعیین کنید\n\n"
-        "📎 <b>لطفاً لینک کانال</b> را ارسال کنید:\n"
+        "🛡 <b>ریپورت کانال</b>\n\n"
+        "مراحل:\n"
+        "1️⃣ لینک کانال\n"
+        "2️⃣ لینک پست‌ها (چندتایی)\n"
+        "3️⃣ متن گزارش (چندتایی)\n"
+        "4️⃣ تعداد اکانت\n"
+        "5️⃣ تعداد دفعات\n\n"
+        "📎 لینک کانال را ارسال کنید:\n"
         "مثال: <code>@username</code> یا <code>https://t.me/username</code>",
         reply_markup=back_button(),
         parse_mode='HTML'
@@ -900,9 +881,7 @@ async def handle_report_group_link(update: Update, context: ContextTypes.DEFAULT
     
     if not username:
         await update.message.reply_text(
-            "❌ لینک کانال نامعتبر است!\n\n"
-            "لطفاً یک لینک معتبر ارسال کنید.\n"
-            "مثال: <code>@username</code> یا <code>https://t.me/username</code>",
+            "❌ لینک نامعتبر!",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
@@ -914,12 +893,11 @@ async def handle_report_group_link(update: Update, context: ContextTypes.DEFAULT
     user_states[user_id] = "waiting_report_post"
     
     await update.message.reply_text(
-        f"✅ لینک کانال با موفقیت ثبت شد.\n\n"
-        "📝 <b>مرحله بعد: ارسال لینک پست‌ها</b>\n\n"
-        "لطفاً <b>لینک پست</b> مورد نظر برای گزارش را ارسال کنید.\n"
+        f"✅ لینک کانال ثبت شد.\n\n"
+        "📝 لینک پست را ارسال کنید:\n"
         "مثال: <code>https://t.me/username/123</code>\n\n"
-        "💡 <b>نکته:</b> می‌توانید چندین لینک پست ارسال کنید.\n"
-        "پس از ارسال همه لینک‌ها، روی دکمه <b>'✅ پست دیگری ندارم'</b> کلیک کنید.",
+        "💡 می‌توانید چندین لینک ارسال کنید.\n"
+        "پس از اتمام، روی دکمه زیر کلیک کنید.",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ پست دیگری ندارم", callback_data="no_more_posts")]
         ]),
@@ -939,9 +917,7 @@ async def handle_report_post_link(update: Update, context: ContextTypes.DEFAULT_
     
     if not match:
         await update.message.reply_text(
-            "❌ لینک پست نامعتبر است!\n\n"
-            "لطفاً یک لینک معتبر ارسال کنید.\n"
-            "مثال: <code>https://t.me/username/123</code>",
+            "❌ لینک پست نامعتبر!",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("✅ پست دیگری ندارم", callback_data="no_more_posts")]
             ]),
@@ -957,9 +933,8 @@ async def handle_report_post_link(update: Update, context: ContextTypes.DEFAULT_
         report_temp[user_id]["posts"].append(msg_id)
     
     await update.message.reply_text(
-        f"✅ لینک پست با موفقیت ثبت شد! (تعداد: {len(report_temp[user_id]['posts'])})\n\n"
-        "📎 برای ارسال پست دیگر، لینک بعدی را بفرستید.\n"
-        "✅ اگر پست دیگری ندارید، روی دکمه زیر کلیک کنید.",
+        f"✅ لینک پست ثبت شد! (تعداد: {len(report_temp[user_id]['posts'])})\n\n"
+        "لینک بعدی را بفرستید یا روی دکمه زیر کلیک کنید.",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ پست دیگری ندارم", callback_data="no_more_posts")]
         ]),
@@ -977,8 +952,7 @@ async def no_more_posts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if "posts" not in report_temp[user_id] or not report_temp[user_id]["posts"]:
         await query.edit_message_text(
-            "❌ شما هیچ لینک پستی ارسال نکرده‌اید!\n\n"
-            "لطفاً حداقل یک لینک پست ارسال کنید.",
+            "❌ هیچ لینک پستی ارسال نکرده‌اید!",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
@@ -988,14 +962,11 @@ async def no_more_posts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_states[user_id] = "waiting_report_text"
     
     await query.edit_message_text(
-        f"✅ <b>{len(report_temp[user_id]['posts'])}</b> لینک پست با موفقیت ثبت شد.\n\n"
-        "📄 <b>مرحله بعد: وارد کردن متن گزارش</b>\n\n"
-        "لطفاً <b>متن گزارش</b> خود را وارد کنید.\n"
-        "این متنی است که به عنوان دلیل گزارش به تلگرام ارسال می‌شود.\n"
-        "مثال: <i>این کانال کلاهبرداری است و کاربران را فریب می‌دهد</i>\n\n"
-        "💡 <b>نکته:</b> می‌توانید چندین متن گزارش ارسال کنید.\n"
-        "پس از ارسال همه متن‌ها، روی دکمه <b>'✅ متن دیگری ندارم'</b> کلیک کنید.\n\n"
-        "⚠️ توجه: هر متن باید حداقل ۱۰ کاراکتر باشد.",
+        f"✅ <b>{len(report_temp[user_id]['posts'])}</b> لینک پست ثبت شد.\n\n"
+        "📄 متن گزارش را وارد کنید:\n"
+        "مثال: <i>این کانال کلاهبرداری است</i>\n\n"
+        "💡 می‌توانید چندین متن ارسال کنید.\n"
+        "پس از اتمام، روی دکمه زیر کلیک کنید.",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ متن دیگری ندارم", callback_data="no_more_texts")]
         ]),
@@ -1011,8 +982,7 @@ async def handle_report_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     if len(report_text) < 10:
         await update.message.reply_text(
-            "❌ متن گزارش بسیار کوتاه است!\n\n"
-            "لطفاً متنی با حداقل ۱۰ کاراکتر وارد کنید.",
+            "❌ متن حداقل ۱۰ کاراکتر!",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("✅ متن دیگری ندارم", callback_data="no_more_texts")]
             ]),
@@ -1027,9 +997,8 @@ async def handle_report_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
         report_temp[user_id]["report_texts"].append(report_text)
     
     await update.message.reply_text(
-        f"✅ متن گزارش با موفقیت ثبت شد! (تعداد: {len(report_temp[user_id]['report_texts'])})\n\n"
-        "📎 برای ارسال متن دیگر، متن بعدی را بفرستید.\n"
-        "✅ اگر متن دیگری ندارید، روی دکمه زیر کلیک کنید.",
+        f"✅ متن گزارش ثبت شد! (تعداد: {len(report_temp[user_id]['report_texts'])})\n\n"
+        "متن بعدی را بفرستید یا روی دکمه زیر کلیک کنید.",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ متن دیگری ندارم", callback_data="no_more_texts")]
         ]),
@@ -1047,8 +1016,7 @@ async def no_more_texts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if "report_texts" not in report_temp[user_id] or not report_temp[user_id]["report_texts"]:
         await query.edit_message_text(
-            "❌ شما هیچ متن گزارشی ارسال نکرده‌اید!\n\n"
-            "لطفاً حداقل یک متن گزارش ارسال کنید.",
+            "❌ هیچ متن گزارشی ارسال نکرده‌اید!",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
@@ -1060,16 +1028,10 @@ async def no_more_texts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     accounts = db.get_accounts()
     available = len(accounts)
     
-    text_preview = "\n".join([f"• {t[:50]}..." for t in report_temp[user_id]["report_texts"][:3]])
-    if len(report_temp[user_id]["report_texts"]) > 3:
-        text_preview += f"\n• ... {len(report_temp[user_id]['report_texts'])-3} متن دیگر"
-    
     await query.edit_message_text(
-        f"✅ <b>{len(report_temp[user_id]['report_texts'])}</b> متن گزارش با موفقیت ثبت شد.\n\n"
-        f"📄 <b>پیش‌نمایش متن‌ها:</b>\n{text_preview}\n\n"
-        f"📊 <b>مرحله بعد: تعداد اکانت‌ها</b>\n\n"
-        f"تعداد اکانت‌های موجود در سیستم: <b>{available}</b>\n\n"
-        f"🔢 لطفاً <b>تعداد اکانت‌ها</b> را وارد کنید (حداکثر {available}):",
+        f"✅ <b>{len(report_temp[user_id]['report_texts'])}</b> متن گزارش ثبت شد.\n\n"
+        f"📊 تعداد اکانت‌های موجود: <b>{available}</b>\n\n"
+        f"🔢 تعداد اکانت‌ها را وارد کنید (حداکثر {available}):",
         reply_markup=back_button(),
         parse_mode='HTML'
     )
@@ -1086,8 +1048,7 @@ async def handle_report_count(update: Update, context: ContextTypes.DEFAULT_TYPE
         
         if count < 1 or count > available:
             await update.message.reply_text(
-                f"❌ تعداد نامعتبر است!\n\n"
-                f"لطفاً عددی بین <b>۱</b> تا <b>{available}</b> وارد کنید.",
+                f"❌ بین ۱ تا {available} وارد کنید!",
                 reply_markup=back_button(),
                 parse_mode='HTML'
             )
@@ -1098,18 +1059,15 @@ async def handle_report_count(update: Update, context: ContextTypes.DEFAULT_TYPE
         user_states[user_id] = "waiting_report_repeat"
         
         await update.message.reply_text(
-            f"✅ تعداد اکانت‌ها: <b>{count}</b>\n\n"
-            "🔄 <b>مرحله آخر: تعداد دفعات ارسال گزارش</b>\n\n"
-            "هر اکانت چند بار گزارش ارسال کند؟\n"
-            "(توصیه می‌شود ۱ بار برای جلوگیری از محدودیت)\n\n"
-            "🔢 لطفاً <b>تعداد دفعات</b> را وارد کنید (۱ تا ۳):",
+            f"✅ تعداد: <b>{count}</b>\n\n"
+            "🔄 تعداد دفعات (۱ تا ۳):",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
         
     except ValueError:
         await update.message.reply_text(
-            "❌ لطفاً یک عدد معتبر وارد کنید!",
+            "❌ عدد وارد کنید!",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
@@ -1124,8 +1082,7 @@ async def handle_report_repeat(update: Update, context: ContextTypes.DEFAULT_TYP
         
         if repeat < 1 or repeat > 3:
             await update.message.reply_text(
-                "❌ تعداد دفعات نامعتبر است!\n\n"
-                "لطفاً عددی بین <b>۱</b> تا <b>۳</b> وارد کنید.",
+                "❌ بین ۱ تا ۳ وارد کنید!",
                 reply_markup=back_button(),
                 parse_mode='HTML'
             )
@@ -1135,23 +1092,20 @@ async def handle_report_repeat(update: Update, context: ContextTypes.DEFAULT_TYP
         
         temp = report_temp.get(user_id, {})
         
-        posts_count = len(temp.get('posts', []))
-        texts_count = len(temp.get('report_texts', []))
-        
         summary = f"""
-📋 <b>خلاصه گزارش:</b>
+📋 <b>خلاصه:</b>
 
-🎯 <b>کانال:</b> {temp.get('group_link', 'نامشخص')}
-📝 <b>تعداد پست‌ها:</b> {posts_count}
-📄 <b>تعداد متن‌های گزارش:</b> {texts_count}
-🔢 <b>تعداد اکانت‌ها:</b> {temp.get('count', 0)}
-🔄 <b>تعداد دفعات:</b> {temp.get('repeat', 0)}
+🎯 کانال: {temp.get('group_link', 'نامشخص')}
+📝 پست‌ها: {len(temp.get('posts', []))}
+📄 متن‌ها: {len(temp.get('report_texts', []))}
+🔢 اکانت‌ها: {temp.get('count', 0)}
+🔄 دفعات: {temp.get('repeat', 0)}
 
-⚠️ <b>آیا از انجام این عملیات مطمئن هستید؟</b>
+⚠️ تایید میکنی؟
 """
         
         keyboard = [
-            [InlineKeyboardButton("✅ تایید و اجرا", callback_data=f"execute_report_{user_id}")],
+            [InlineKeyboardButton("✅ اجرا", callback_data=f"execute_report_{user_id}")],
             [InlineKeyboardButton("❌ لغو", callback_data="cancel_report")]
         ]
         
@@ -1162,7 +1116,7 @@ async def handle_report_repeat(update: Update, context: ContextTypes.DEFAULT_TYP
         
     except ValueError:
         await update.message.reply_text(
-            "❌ لطفاً یک عدد معتبر وارد کنید!",
+            "❌ عدد وارد کنید!",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
@@ -1198,15 +1152,13 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     try:
         await query.edit_message_text(
-            "⏳ <b>در حال اجرای عملیات ریپورت...</b>\n\n"
-            "لطفاً صبر کنید...\n"
-            "این عملیات ممکن است چند لحظه طول بکشد.",
+            "⏳ <b>در حال اجرا...</b>\n\nلطفاً صبر کنید...",
             parse_mode='HTML'
         )
         
         group = temp.get("group")
         group_link = temp.get("group_link")
-        report_texts = temp.get("report_texts", ["گزارش کلاهبرداری و اسکم"])
+        report_texts = temp.get("report_texts", ["گزارش کلاهبرداری"])
         count = temp.get("count", 1)
         repeat = temp.get("repeat", 1)
         posts = temp.get("posts", [])
@@ -1214,7 +1166,7 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         accounts = db.get_accounts()[:count]
         
         if len(accounts) < count:
-            await query.edit_message_text("❌ تعداد اکانت‌ها کافی نیست!", reply_markup=main_menu(), parse_mode='HTML')
+            await query.edit_message_text("❌ تعداد اکانت کافی نیست!", reply_markup=main_menu(), parse_mode='HTML')
             return
         
         total_success = 0
@@ -1229,7 +1181,6 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 results = []
                 join_results = []
                 
-                # مرحله 1: جوین شدن به کانال (فقط یک بار برای هر اکانت)
                 if post_index == 1 and text_index == 1:
                     for account in accounts:
                         try:
@@ -1242,8 +1193,6 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             api_hash = account.get("api_hash")
                             
                             if not api_id or not api_hash:
-                                logger.error(f"API credentials missing for {account['phone']}")
-                                db.mark_account_invalid(account['phone'], "Missing API credentials")
                                 join_results.append(f"❌ {mask_phone(account['phone'])}: اطلاعات API موجود نیست")
                                 continue
                             
@@ -1251,8 +1200,7 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             await client.connect()
                             
                             if not await client.is_user_authorized():
-                                db.mark_account_invalid(account['phone'], "Not authorized")
-                                join_results.append(f"❌ {mask_phone(account['phone'])}: احراز هویت نشده")
+                                join_results.append(f"❌ {mask_phone(account['phone'])}: احراز نشده")
                                 await client.disconnect()
                                 continue
                             
@@ -1270,18 +1218,14 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                     else:
                                         join_results.append(f"❌ {mask_phone(account['phone'])}: خطا در جوین")
                                 await asyncio.sleep(1)
-                            except (ChannelInvalidError, ChannelPrivateError, UsernameNotOccupiedError):
+                            except Exception:
                                 join_results.append(f"❌ {mask_phone(account['phone'])}: کانال نامعتبر")
-                            except Exception as e:
-                                join_results.append(f"❌ {mask_phone(account['phone'])}: خطا")
                             
                             await client.disconnect()
-                            db.update_account_last_used(account['phone'])
                             
                         except Exception as e:
                             join_results.append(f"❌ {mask_phone(account['phone'])}: خطا")
                 
-                # مرحله 2: ارسال گزارش برای هر پست و هر متن
                 for account in accounts:
                     try:
                         session_file = account.get("session_file")
@@ -1303,20 +1247,15 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         
                         if not await client.is_user_authorized():
                             fail += 1
-                            results.append(f"❌ {mask_phone(account['phone'])}: احراز هویت نشده")
+                            results.append(f"❌ {mask_phone(account['phone'])}: احراز نشده")
                             await client.disconnect()
                             continue
                         
                         try:
                             entity = await client.get_entity(f"@{group}")
-                        except (ChannelInvalidError, ChannelPrivateError, UsernameNotOccupiedError):
+                        except Exception:
                             fail += 1
                             results.append(f"❌ {mask_phone(account['phone'])}: کانال نامعتبر")
-                            await client.disconnect()
-                            continue
-                        except Exception as e:
-                            fail += 1
-                            results.append(f"❌ {mask_phone(account['phone'])}: خطا")
                             await client.disconnect()
                             continue
                         
@@ -1329,7 +1268,7 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                     message=report_text
                                 ))
                                 success += 1
-                                results.append(f"✅ {mask_phone(account['phone'])}: پست {post_index} - متن {text_index} - ریپورت {i+1} ارسال شد")
+                                results.append(f"✅ {mask_phone(account['phone'])}: پست {post_index} - متن {text_index} - ریپورت {i+1}")
                                 await asyncio.sleep(2)
                             except FloodWaitError as e:
                                 fail += 1
@@ -1337,11 +1276,10 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                 await asyncio.sleep(min(e.seconds, 10))
                             except Exception as e:
                                 fail += 1
-                                results.append(f"❌ {mask_phone(account['phone'])}: خطا در ریپورت {i+1}")
+                                results.append(f"❌ {mask_phone(account['phone'])}: خطا")
                                 await asyncio.sleep(1)
                         
                         await client.disconnect()
-                        db.update_account_last_used(account['phone'])
                         
                     except Exception as e:
                         fail += 1
@@ -1352,7 +1290,6 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 all_results.extend(results)
                 all_join_results.extend(join_results)
         
-        # ثبت گزارش
         report_id = db.add_report(
             group, group_link, str(report_texts), count, repeat,
             total_success, total_fail, total_success + total_fail,
@@ -1362,20 +1299,16 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.add_log(user_id, "execute_report", f"Report {report_id} - Success: {total_success}, Fail: {total_fail}")
         
         result_text = f"""
-📊 <b>نتیجه عملیات ریپورت:</b>
+📊 <b>نتیجه:</b>
 
-🎯 <b>کانال:</b> {group_link}
-📝 <b>تعداد پست‌ها:</b> {len(posts)}
-📄 <b>تعداد متن‌های گزارش:</b> {len(report_texts)}
-✅ <b>ریپورت موفق:</b> {total_success}
-❌ <b>خطا:</b> {total_fail}
-📋 <b>مجموع:</b> {total_success + total_fail}
+🎯 {group_link}
+📝 پست‌ها: {len(posts)}
+📄 متن‌ها: {len(report_texts)}
+✅ موفق: {total_success}
+❌ خطا: {total_fail}
+📋 مجموع: {total_success + total_fail}
 
-⚠️ <b>توجه مهم:</b>
-"موفق" به معنای ارسال موفق درخواست به تلگرام است،
-نه تایید نهایی گزارش توسط تلگرام.
-
-📋 <b>وضعیت جوین:</b>
+📋 وضعیت جوین:
 """
         
         for jr in all_join_results[:3]:
@@ -1384,7 +1317,7 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if len(all_join_results) > 3:
             result_text += f"\n... {len(all_join_results)-3} نتیجه دیگر"
         
-        result_text += f"\n\n📋 <b>نتیجه ریپورت:</b>"
+        result_text += f"\n\n📋 نتیجه ریپورت:"
         
         for r in all_results[:3]:
             result_text += f"\n{r}"
@@ -1398,10 +1331,8 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='HTML'
         )
         
-        # ارسال به کانال
         await send_report_to_channel(context, {
             "group_link": group_link,
-            "text": str(report_texts),
             "accounts": count,
             "repeat": repeat,
             "success": total_success,
@@ -1426,21 +1357,19 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def send_report_to_channel(context, report_data):
     try:
         text = f"""
-📊 <b>گزارش جدید ریپورت</b>
+📊 <b>گزارش جدید</b>
 
-🎯 <b>کانال:</b> {report_data.get('group_link', 'نامشخص')}
-📝 <b>تعداد متن‌ها:</b> {report_data.get('texts_count', 0)}
-📝 <b>تعداد پست‌ها:</b> {report_data.get('posts_count', 0)}
-🔢 <b>تعداد اکانت‌ها:</b> {report_data.get('accounts', 0)}
-🔄 <b>تعداد دفعات:</b> {report_data.get('repeat', 0)}
-✅ <b>موفق:</b> {report_data.get('success', 0)}
-❌ <b>خطا:</b> {report_data.get('fail', 0)}
-📋 <b>مجموع:</b> {report_data.get('total', 0)}
-📅 <b>تاریخ:</b> {report_data.get('date', '')[:19]}
+🎯 {report_data.get('group_link', 'نامشخص')}
+📝 پست‌ها: {report_data.get('posts_count', 0)}
+📄 متن‌ها: {report_data.get('texts_count', 0)}
+🔢 اکانت‌ها: {report_data.get('accounts', 0)}
+🔄 دفعات: {report_data.get('repeat', 0)}
+✅ موفق: {report_data.get('success', 0)}
+❌ خطا: {report_data.get('fail', 0)}
+📋 مجموع: {report_data.get('total', 0)}
+📅 {report_data.get('date', '')[:19]}
 
-⚠️ <b>نکته:</b> "موفق" به معنای ارسال موفق درخواست است.
-
-📋 <b>جزئیات:</b>
+📋 جزئیات:
 """
         
         for r in report_data.get('results', [])[:5]:
@@ -1454,8 +1383,6 @@ async def send_report_to_channel(context, report_data):
             text=text,
             parse_mode='HTML'
         )
-        
-        logger.info(f"Report sent to channel")
         
     except Exception as e:
         logger.error(f"Error sending report to channel: {e}")
@@ -1476,14 +1403,13 @@ async def show_reports(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reports = db.get_reports(10)
     if not reports:
         await query.edit_message_text(
-            "📭 <b>هیچ گزارشی در سیستم ثبت نشده است!</b>\n\n"
-            "پس از انجام عملیات ریپورت، گزارشات در این بخش نمایش داده می‌شوند.",
+            "📭 گزارشی ثبت نشده!",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
         return
     
-    text = "📊 <b>تاریخچه گزارشات ارسال شده:</b>\n\n"
+    text = "📊 <b>تاریخچه:</b>\n\n"
     for i, r in enumerate(reports[:5], 1):
         text += f"{i}. 🎯 {r.get('group_name', 'نامشخص')}\n"
         text += f"   ✅ موفق: {r.get('success_count', 0)}\n"
@@ -1511,17 +1437,14 @@ async def manage_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_msg_ids[user_id] = query.message.message_id
     
     keyboard = [
-        [InlineKeyboardButton("➕ افزودن ادمین", callback_data="add_admin")],
-        [InlineKeyboardButton("🗑 حذف ادمین", callback_data="remove_admin")],
-        [InlineKeyboardButton("📋 لیست ادمین‌ها", callback_data="list_admins")],
+        [InlineKeyboardButton("➕ افزودن", callback_data="add_admin")],
+        [InlineKeyboardButton("🗑 حذف", callback_data="remove_admin")],
+        [InlineKeyboardButton("📋 لیست", callback_data="list_admins")],
         [InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_menu")]
     ]
     
     await query.edit_message_text(
-        "👥 <b>مدیریت ادمین‌های ربات</b>\n\n"
-        "🔹 <b>افزودن ادمین:</b> کاربر جدید را به لیست ادمین‌ها اضافه کنید\n"
-        "🔸 <b>حذف ادمین:</b> یک ادمین را از لیست حذف کنید\n"
-        "📋 <b>لیست ادمین‌ها:</b> مشاهده لیست کامل ادمین‌ها",
+        "👥 مدیریت ادمین:",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode='HTML'
     )
@@ -1539,9 +1462,7 @@ async def add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_states[user_id] = "waiting_admin_id"
     
     await query.edit_message_text(
-        "➕ <b>افزودن ادمین جدید</b>\n\n"
-        "🆔 لطفاً <b>آیدی عددی</b> کاربر مورد نظر را وارد کنید.\n\n"
-        "⚠️ فقط کاربری که آیدی آن را وارد کنید، به ربات دسترسی خواهد داشت.",
+        "➕ آیدی عددی رو وارد کن:",
         reply_markup=back_button(),
         parse_mode='HTML'
     )
@@ -1555,26 +1476,18 @@ async def handle_add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         admin_id = int(update.message.text.strip())
         
         if db.is_admin(admin_id):
-            await update.message.reply_text(
-                "⚠️ این کاربر قبلاً در لیست ادمین‌ها قرار دارد!",
-                reply_markup=main_menu(),
-                parse_mode='HTML'
-            )
+            await update.message.reply_text("⚠️ قبلاً هست!", reply_markup=main_menu(), parse_mode='HTML')
             return
         
         if admin_id in ALLOWED_USERS:
-            await update.message.reply_text(
-                "⚠️ این کاربر در لیست ادمین‌های اصلی قرار دارد!",
-                reply_markup=main_menu(),
-                parse_mode='HTML'
-            )
+            await update.message.reply_text("⚠️ در لیست اصلی هست!", reply_markup=main_menu(), parse_mode='HTML')
             return
         
         db.add_admin(admin_id)
         db.add_log(user_id, "add_admin", f"Added admin {admin_id}")
         
         await update.message.reply_text(
-            f"✅ ادمین <code>{admin_id}</code> با موفقیت به سیستم اضافه شد!",
+            f"✅ ادمین {admin_id} اضافه شد!",
             reply_markup=main_menu(),
             parse_mode='HTML'
         )
@@ -1582,7 +1495,7 @@ async def handle_add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
     except ValueError:
         await update.message.reply_text(
-            "❌ لطفاً یک آیدی عددی معتبر وارد کنید!",
+            "❌ عدد وارد کن!",
             reply_markup=main_menu(),
             parse_mode='HTML'
         )
@@ -1603,7 +1516,7 @@ async def remove_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if not admins:
         await query.edit_message_text(
-            "📭 هیچ ادمین اضافه‌ای در سیستم ثبت نشده است!",
+            "📭 ادمین اضافه‌ای نیست!",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
@@ -1615,8 +1528,7 @@ async def remove_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard.append([InlineKeyboardButton("🔙 بازگشت", callback_data="manage_admins")])
     
     await query.edit_message_text(
-        "🗑 <b>انتخاب ادمین برای حذف:</b>\n\n"
-        "روی ادمین مورد نظر کلیک کنید.",
+        "🗑 انتخاب کن:",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode='HTML'
     )
@@ -1637,12 +1549,12 @@ async def remove_admin_confirm(update: Update, context: ContextTypes.DEFAULT_TYP
         db.remove_admin(admin_id)
         db.add_log(user_id, "remove_admin", f"Removed admin {admin_id}")
         await query.edit_message_text(
-            f"✅ ادمین <code>{admin_id}</code> با موفقیت حذف شد!",
+            f"✅ {admin_id} حذف شد!",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
     else:
-        await query.answer("❌ ادمین مورد نظر یافت نشد!", show_alert=True)
+        await query.answer("❌ یافت نشد!", show_alert=True)
 
 async def list_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -1655,8 +1567,8 @@ async def list_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     user_msg_ids[user_id] = query.message.message_id
     
-    text = "👥 <b>لیست ادمین‌های ربات:</b>\n\n"
-    text += "🔹 <b>ادمین‌های اصلی:</b>\n"
+    text = "👥 <b>ادمین‌ها:</b>\n\n"
+    text += "🔹 اصلی:\n"
     for uid in ALLOWED_USERS:
         text += f"   • <code>{uid}</code>\n"
     
@@ -1664,11 +1576,11 @@ async def list_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     extra_admins = [a for a in admins if a not in ALLOWED_USERS]
     
     if extra_admins:
-        text += "\n🔸 <b>ادمین‌های اضافه شده:</b>\n"
+        text += "\n🔸 اضافه شده:\n"
         for admin in extra_admins:
             text += f"   • <code>{admin}</code>\n"
     else:
-        text += "\n📭 <i>هیچ ادمین اضافه‌ای ثبت نشده است.</i>"
+        text += "\n📭 اضافه‌ای نیست."
     
     await query.edit_message_text(
         text,
@@ -1690,35 +1602,20 @@ async def help_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_msg_ids[user_id] = query.message.message_id
     
     text = """
-❓ <b>راهنمای کامل ربات ریپورتر والکری</b>
+❓ <b>راهنما</b>
 
 <b>🛡 ریپورت کانال:</b>
-برای گزارش کانال‌های متخلف
-مراحل: لینک کانال → لینک پست‌ها (چندتایی) → متن‌های گزارش (چندتایی) → تعداد اکانت → تعداد دفعات
+لینک کانال → لینک پست‌ها → متن‌ها → تعداد اکانت → تعداد دفعات
 
 <b>➕ افزودن اکانت:</b>
-اضافه کردن اکانت تلگرام با سشن
-مراحل: شماره → API ID → API Hash → کد تایید
+شماره → API ID → API Hash → کد تایید
 
-<b>📋 لیست اکانت‌ها:</b>
-مشاهده همه اکانت‌های ثبت شده و حذف اکانت‌های اضافی
+<b>📋 مدیریت:</b>
+لیست اکانت‌ها - حذف اکانت - مدیریت ادمین
 
-<b>📊 گزارشات:</b>
-مشاهده تاریخچه گزارشات ارسال شده
-
-<b>👤 مدیریت ادمین:</b>
-افزودن یا حذف ادمین‌های جدید
-
-<b>📣 کانال گزارشات:</b>
-مشاهده همه گزارشات در کانال
-
-⚠️ <b>نکات مهم:</b>
-• برای ریپورت حداقل ۱ اکانت نیاز دارید
-• API ID و Hash رو از my.telegram.org بگیرید
-• کد تایید رو به صورت ۵.۱.۷.۳.۲ وارد کنید
-• توصیه: هر اکانت ۱ بار ریپورت بزند
-• اطلاعات شما به صورت امن در دیتابیس ذخیره می‌شود
-• شماره تلفن‌ها برای حفظ حریم خصوصی سانسور می‌شوند
+⚠️ <b>نکات:</b>
+• API ID و Hash از my.telegram.org
+• کد تایید: ۵.۱.۷.۳.۲
 """
     
     await query.edit_message_text(
@@ -1744,8 +1641,7 @@ async def back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         del report_temp[user_id]
     
     await query.edit_message_text(
-        "🌟 <b>منوی اصلی</b>\n\n"
-        "یکی از گزینه‌های زیر را انتخاب کنید:",
+        "🌟 <b>منوی اصلی</b>",
         reply_markup=main_menu(),
         parse_mode='HTML'
     )
@@ -1763,7 +1659,7 @@ async def cancel_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         del user_states[user_id]
     
     await query.edit_message_text(
-        "❌ عملیات ریپورت با موفقیت لغو شد!",
+        "❌ لغو شد!",
         reply_markup=main_menu(),
         parse_mode='HTML'
     )
@@ -1807,7 +1703,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     app = Application.builder().token(TOKEN).build()
     
-    # حذف Webhook برای جلوگیری از خطای 409 Conflict
     try:
         import asyncio
         loop = asyncio.new_event_loop()
@@ -1841,7 +1736,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
     print("=" * 50)
-    print("🔥 ربات ریپورتر والکری - نسخه نهایی")
+    print("🔥 ربات ریپورتر والکری")
     print("=" * 50)
     accounts = db.get_accounts()
     admins = db.get_admins()
@@ -1851,18 +1746,12 @@ def main():
     print(f"📋 گزارش‌ها: {len(reports)}")
     print("=" * 50)
     print("🔄 در حال اجرا...")
-    print("✅ هیچ پیامی حذف نمیشه")
-    print("✅ شماره‌ها سانسور میشن (989******458)")
-    print("✅ پشتیبانی از چندین لینک پست")
-    print("✅ پشتیبانی از چندین متن گزارش")
-    print("✅ دکمه 'پست دیگری ندارم'")
-    print("✅ دکمه 'متن دیگری ندارم'")
-    print("✅ متن‌ها با توضیحات کامل")
-    print("✅ Webhook غیرفعال شد - خطای 409 رفع شد")
+    print("✅ شماره‌ها سانسور میشن")
+    print("✅ پشتیبانی از چندین پست و متن")
+    print("✅ Webhook غیرفعال شد")
     print("=" * 50)
     
     app.run_polling()
 
 if __name__ == "__main__":
     main()
-```
