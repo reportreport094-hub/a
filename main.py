@@ -1590,33 +1590,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif state == "waiting_report_repeat":
             await handle_report_repeat(update, context)
 
-# ==================== اجرا (رفع مشکل Event Loop) ====================
+# ==================== اجرا ====================
 
-def main():
-    """تابع اصلی با رفع مشکل Event Loop در پایتون 3.13"""
+async def async_main():
+    """تابع اصلی async برای رفع مشکل event loop"""
     # ایجاد Application
     app = Application.builder().token(TOKEN).build()
     
-    # حذف webhook با استفاده از asyncio.run()
-    async def delete_webhook():
-        try:
-            await app.bot.delete_webhook()
-            logger.info("Webhook deleted successfully")
-        except Exception as e:
-            logger.error(f"Error deleting webhook: {e}")
-    
-    # اجرای delete_webhook با مدیریت صحیح event loop
+    # حذف webhook
     try:
-        asyncio.run(delete_webhook())
-    except RuntimeError as e:
-        if "no current event loop" in str(e):
-            # برای پایتون 3.13
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(delete_webhook())
-            loop.close()
-        else:
-            raise
+        await app.bot.delete_webhook()
+        logger.info("Webhook deleted successfully")
+    except Exception as e:
+        logger.error(f"Error deleting webhook: {e}")
     
     # اضافه کردن هندلرها
     app.add_handler(CommandHandler("start", start))
@@ -1658,8 +1644,36 @@ def main():
     print("✅ سازگار با پایتون 3.13")
     print("=" * 50)
     
-    # اجرا با مدیریت صحیح event loop
-    app.run_polling()
+    # شروع polling
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+    
+    # نگه داشتن برای اجرا
+    try:
+        while True:
+            await asyncio.sleep(1)
+    except (KeyboardInterrupt, SystemExit):
+        pass
+    finally:
+        await app.updater.stop()
+        await app.stop()
+        await app.shutdown()
+
+def main():
+    """تابع اصلی با مدیریت صحیح event loop"""
+    try:
+        # برای پایتون 3.13
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(async_main())
+        loop.close()
+    except RuntimeError as e:
+        if "no current event loop" in str(e):
+            # روش جایگزین
+            asyncio.run(async_main())
+        else:
+            raise
 
 if __name__ == "__main__":
     main()
