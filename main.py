@@ -292,6 +292,7 @@ user_states = {}
 user_temp = {}
 report_temp = {}
 processing_reports = set()
+user_messages = {}  # برای ذخیره پیام‌های مرحله‌ای
 
 # ==================== بررسی دسترسی ====================
 
@@ -392,7 +393,6 @@ async def handle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     phone = update.message.text.strip()
-    # پاک کردن پیام کاربر
     try:
         await update.message.delete()
     except:
@@ -642,16 +642,13 @@ async def get_account_info(update, client, user_id, status_msg):
         db.add_account(phone, username, first_name, last_name, telegram_id, session_file, api_id, api_hash)
         db.add_log(user_id, "add_account", f"Added account {phone}")
         
-        # حذف همه پیام‌های قبلی (هر دو طرف - ربات و کاربر) بجز پیام نهایی
+        # حذف پیام‌های مرحله‌ای
         try:
-            # حذف پیام‌های قبلی ربات (از status_msg قبلی)
             chat_id = update.effective_chat.id
-            # پیام‌های قبلی رو حذف میکنیم
             await context.bot.delete_message(chat_id, status_msg.message_id)
         except:
             pass
         
-        # ارسال پیام نهایی موفقیت
         await update.message.reply_text(
             f"✅ <b>اکانت با موفقیت اضافه شد!</b>\n\n"
             f"📱 {phone}\n"
@@ -778,6 +775,7 @@ async def report_group_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     
     user_id = query.from_user.id
+    user_messages[user_id] = []  # لیست پیام‌های مرحله‌ای
     
     accounts = db.get_accounts()
     if len(accounts) < 1:
@@ -791,7 +789,7 @@ async def report_group_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
     report_temp[user_id] = {}
     user_states[user_id] = "waiting_report_group"
     
-    await query.edit_message_text(
+    msg = await query.edit_message_text(
         "🛡 <b>ریپورت کانال</b>\n\n"
         "مراحل:\n"
         "1️⃣ لینک کانال\n"
@@ -804,6 +802,7 @@ async def report_group_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
         reply_markup=back_button(),
         parse_mode='HTML'
     )
+    user_messages[user_id].append(msg.message_id)
 
 async def handle_report_group_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -828,22 +827,24 @@ async def handle_report_group_link(update: Update, context: ContextTypes.DEFAULT
         username = username[1:]
     
     if not username:
-        await update.message.reply_text(
+        msg = await update.message.reply_text(
             "❌ لینک نامعتبر!",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
+        user_messages[user_id].append(msg.message_id)
         return
     
     report_temp[user_id]["group"] = username
     report_temp[user_id]["group_link"] = link
     user_states[user_id] = "waiting_report_post"
     
-    await update.message.reply_text(
+    msg = await update.message.reply_text(
         f"✅ لینک ثبت شد.\n\n📝 لینک پست رو بفرست:\nمثال: <code>https://t.me/username/123</code>",
         reply_markup=back_button(),
         parse_mode='HTML'
     )
+    user_messages[user_id].append(msg.message_id)
 
 async def handle_report_post_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -861,22 +862,24 @@ async def handle_report_post_link(update: Update, context: ContextTypes.DEFAULT_
         match = re.search(r'https?://t\.me/c/(\d+)/(\d+)', post_link)
     
     if not match:
-        await update.message.reply_text(
+        msg = await update.message.reply_text(
             "❌ لینک پست نامعتبر!",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
+        user_messages[user_id].append(msg.message_id)
         return
     
     report_temp[user_id]["post_link"] = post_link
     report_temp[user_id]["msg_id"] = int(match.group(2))
     user_states[user_id] = "waiting_report_text"
     
-    await update.message.reply_text(
+    msg = await update.message.reply_text(
         f"✅ لینک پست ثبت شد.\n\n📄 متن گزارش رو وارد کن:",
         reply_markup=back_button(),
         parse_mode='HTML'
     )
+    user_messages[user_id].append(msg.message_id)
 
 async def handle_report_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -890,11 +893,12 @@ async def handle_report_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
         pass
     
     if len(report_text) < 10:
-        await update.message.reply_text(
+        msg = await update.message.reply_text(
             "❌ متن حداقل ۱۰ کاراکتر!",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
+        user_messages[user_id].append(msg.message_id)
         return
     
     report_temp[user_id]["text"] = report_text
@@ -902,11 +906,12 @@ async def handle_report_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     accounts = db.get_accounts()
     available = len(accounts)
-    await update.message.reply_text(
+    msg = await update.message.reply_text(
         f"✅ متن ثبت شد.\n\n🔢 تعداد اکانت‌ها (حداکثر {available}):",
         reply_markup=back_button(),
         parse_mode='HTML'
     )
+    user_messages[user_id].append(msg.message_id)
 
 async def handle_report_count(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -924,28 +929,31 @@ async def handle_report_count(update: Update, context: ContextTypes.DEFAULT_TYPE
         available = len(accounts)
         
         if count < 1 or count > available:
-            await update.message.reply_text(
+            msg = await update.message.reply_text(
                 f"❌ بین ۱ تا {available} وارد کن!",
                 reply_markup=back_button(),
                 parse_mode='HTML'
             )
+            user_messages[user_id].append(msg.message_id)
             return
         
         report_temp[user_id]["count"] = count
         user_states[user_id] = "waiting_report_repeat"
         
-        await update.message.reply_text(
+        msg = await update.message.reply_text(
             f"✅ تعداد: {count}\n\n🔄 تعداد دفعات (۱ تا ۳):",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
+        user_messages[user_id].append(msg.message_id)
         
     except ValueError:
-        await update.message.reply_text(
+        msg = await update.message.reply_text(
             "❌ عدد وارد کن!",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
+        user_messages[user_id].append(msg.message_id)
 
 async def handle_report_repeat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -961,11 +969,12 @@ async def handle_report_repeat(update: Update, context: ContextTypes.DEFAULT_TYP
         repeat = int(update.message.text.strip())
         
         if repeat < 1 or repeat > 3:
-            await update.message.reply_text(
+            msg = await update.message.reply_text(
                 "❌ بین ۱ تا ۳ وارد کن!",
                 reply_markup=back_button(),
                 parse_mode='HTML'
             )
+            user_messages[user_id].append(msg.message_id)
             return
         
         report_temp[user_id]["repeat"] = repeat
@@ -989,17 +998,19 @@ async def handle_report_repeat(update: Update, context: ContextTypes.DEFAULT_TYP
             [InlineKeyboardButton("❌ لغو", callback_data="cancel_report")]
         ]
         
-        await update.message.reply_text(summary, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+        msg = await update.message.reply_text(summary, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+        user_messages[user_id].append(msg.message_id)
         
         if user_id in user_states:
             del user_states[user_id]
         
     except ValueError:
-        await update.message.reply_text(
+        msg = await update.message.reply_text(
             "❌ عدد وارد کن!",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
+        user_messages[user_id].append(msg.message_id)
 
 # ==================== اجرای ریپورت ====================
 
@@ -1080,7 +1091,6 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     continue
                 
                 try:
-                    # جوین شدن به کانال
                     entity = await client.get_entity(f"@{group}")
                     try:
                         await client(functions.channels.JoinChannelRequest(entity))
@@ -1105,7 +1115,7 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 join_results.append(f"❌ {account['phone']}: خطا")
         
-        # مرحله 2: ارسال گزارش (ریپورت)
+        # مرحله 2: ارسال گزارش
         for account in accounts:
             try:
                 session_file = account.get("session_file")
@@ -1180,15 +1190,19 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         db.add_log(user_id, "execute_report", f"Report {report_id} - Success: {success}, Fail: {fail}")
         
-        # حذف همه پیام‌های قبلی (هر دو طرف) بجز پیام نهایی
-        try:
-            chat_id = update.effective_chat.id
-            # پیام‌های قبلی رو حذف میکنیم
-            for msg_id in [query.message.message_id]:
+        # حذف همه پیام‌های مرحله‌ای
+        chat_id = update.effective_chat.id
+        if user_id in user_messages:
+            for msg_id in user_messages[user_id]:
                 try:
                     await context.bot.delete_message(chat_id, msg_id)
                 except:
                     pass
+            del user_messages[user_id]
+        
+        # حذف پیام Query (دکمه تایید)
+        try:
+            await context.bot.delete_message(chat_id, query.message.message_id)
         except:
             pass
         
@@ -1505,6 +1519,8 @@ async def back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         del user_states[user_id]
     if user_id in user_temp:
         del user_temp[user_id]
+    if user_id in user_messages:
+        del user_messages[user_id]
     
     await query.edit_message_text(
         "🌟 <b>منوی اصلی</b>",
@@ -1517,6 +1533,16 @@ async def cancel_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     user_id = query.from_user.id
+    
+    # حذف پیام‌های مرحله‌ای
+    chat_id = update.effective_chat.id
+    if user_id in user_messages:
+        for msg_id in user_messages[user_id]:
+            try:
+                await context.bot.delete_message(chat_id, msg_id)
+            except:
+                pass
+        del user_messages[user_id]
     
     if user_id in report_temp:
         del report_temp[user_id]
@@ -1599,9 +1625,9 @@ def main():
     print(f"📋 گزارش‌ها: {len(reports)}")
     print("=" * 50)
     print("🔄 در حال اجرا...")
+    print("✅ پیام‌های مرحله‌ای حذف میشن")
+    print("✅ فقط نتیجه نهایی باقی میمونه")
     print("✅ اکانت‌ها جوین کانال میشن")
-    print("✅ پیام‌های اضافی حذف میشن")
-    print("✅ نسخه نهایی - کوتاه و حرفه‌ای")
     print("=" * 50)
     
     app.run_polling()
