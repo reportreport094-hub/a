@@ -292,7 +292,7 @@ user_states = {}
 user_temp = {}
 report_temp = {}
 processing_reports = set()
-user_messages = {}  # ذخیره message_idهای پیام‌های ربات برای حذف
+user_messages = {}
 
 # ==================== بررسی دسترسی ====================
 
@@ -370,23 +370,12 @@ async def add_account_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     if not check_user_access(update):
-        await query.edit_message_text("🚫 دسترسی غیرمجاز!", parse_mode='HTML')
+        await query.answer("🚫 دسترسی غیرمجاز!", show_alert=True)
         return
     
     user_id = query.from_user.id
     user_temp[user_id] = {}
     user_states[user_id] = "waiting_phone"
-    
-    # پاک کردن پیام‌های قبلی
-    if user_id in user_messages:
-        for msg_id in user_messages[user_id]:
-            try:
-                await context.bot.delete_message(query.message.chat.id, msg_id)
-            except:
-                pass
-        user_messages[user_id] = []
-    else:
-        user_messages[user_id] = []
     
     text = """
 ➕ <b>افزودن اکانت</b>
@@ -396,8 +385,13 @@ async def add_account_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 📱 شماره رو وارد کن:
 """
-    msg = await query.edit_message_text(text, reply_markup=back_button(), parse_mode='HTML')
-    user_messages[user_id].append(msg.message_id)
+    # ارسال پیام جدید (نه ویرایش)
+    await context.bot.send_message(
+        chat_id=query.message.chat.id,
+        text=text,
+        reply_markup=back_button(),
+        parse_mode='HTML'
+    )
 
 async def handle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -405,38 +399,28 @@ async def handle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     phone = update.message.text.strip()
-    # حذف پیام کاربر (شماره)
+    # حذف پیام کاربر
     try:
         await update.message.delete()
     except:
         pass
     
     if not re.match(r'^\+?[0-9]{10,15}$', phone):
-        msg = await update.message.reply_text(
+        await update.message.reply_text(
             "❌ شماره نامعتبر! مثال: <code>+989123456789</code>",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
-        user_messages[user_id].append(msg.message_id)
         return
     
     user_temp[user_id]['phone'] = phone
     user_states[user_id] = "waiting_api_id"
     
-    # حذف پیام قبلی ربات
-    if user_messages[user_id]:
-        try:
-            await context.bot.delete_message(update.message.chat.id, user_messages[user_id][-1])
-        except:
-            pass
-        user_messages[user_id].pop()
-    
-    msg = await update.message.reply_text(
+    await update.message.reply_text(
         f"✅ شماره ثبت شد.\n\n🔑 API ID رو وارد کن:\n(از my.telegram.org)",
         reply_markup=back_button(),
         parse_mode='HTML'
     )
-    user_messages[user_id].append(msg.message_id)
 
 async def handle_api_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -452,38 +436,28 @@ async def handle_api_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         api_id_int = int(api_id)
         if api_id_int <= 0 or api_id_int > 2147483647:
-            msg = await update.message.reply_text(
+            await update.message.reply_text(
                 "❌ API ID باید بین 1 تا 2147483647 باشه!",
                 reply_markup=back_button(),
                 parse_mode='HTML'
             )
-            user_messages[user_id].append(msg.message_id)
             return
     except ValueError:
-        msg = await update.message.reply_text(
+        await update.message.reply_text(
             "❌ API ID باید عدد باشه!",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
-        user_messages[user_id].append(msg.message_id)
         return
     
     user_temp[user_id]['api_id'] = api_id
     user_states[user_id] = "waiting_api_hash"
     
-    if user_messages[user_id]:
-        try:
-            await context.bot.delete_message(update.message.chat.id, user_messages[user_id][-1])
-        except:
-            pass
-        user_messages[user_id].pop()
-    
-    msg = await update.message.reply_text(
+    await update.message.reply_text(
         f"✅ API ID ثبت شد.\n\n🔐 API Hash رو وارد کن:\n(از my.telegram.org)",
         reply_markup=back_button(),
         parse_mode='HTML'
     )
-    user_messages[user_id].append(msg.message_id)
 
 async def handle_api_hash(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -497,29 +471,20 @@ async def handle_api_hash(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
     
     if len(api_hash) < 20:
-        msg = await update.message.reply_text(
+        await update.message.reply_text(
             "❌ API Hash نامعتبر! دوباره وارد کن.",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
-        user_messages[user_id].append(msg.message_id)
         return
     
     user_temp[user_id]['api_hash'] = api_hash
     user_states[user_id] = "waiting_code"
     
-    if user_messages[user_id]:
-        try:
-            await context.bot.delete_message(update.message.chat.id, user_messages[user_id][-1])
-        except:
-            pass
-        user_messages[user_id].pop()
-    
     status_msg = await update.message.reply_text(
         "⏳ در حال ارسال کد تایید...",
         parse_mode='HTML'
     )
-    user_messages[user_id].append(status_msg.message_id)
     
     await start_connection(user_id, update, status_msg)
 
@@ -543,19 +508,11 @@ async def start_connection(user_id, update, status_msg):
             await client.send_code_request(phone)
             user_temp[user_id]['client'] = client
             
-            if user_messages[user_id]:
-                try:
-                    await context.bot.delete_message(update.message.chat.id, user_messages[user_id][-1])
-                except:
-                    pass
-                user_messages[user_id].pop()
-            
-            msg = await status_msg.edit_text(
+            await status_msg.edit_text(
                 f"📨 کد تایید ارسال شد!\n\n📱 {phone}\n\n🔑 کد رو به صورت <b>۵.۱.۷.۳.۲</b> وارد کن:",
                 reply_markup=back_button(),
                 parse_mode='HTML'
             )
-            user_messages[user_id].append(msg.message_id)
             user_states[user_id] = "waiting_code"
         else:
             await get_account_info(update, client, user_id, status_msg)
@@ -582,23 +539,14 @@ async def handle_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     code = code_input.replace('.', '').replace('،', '').replace(' ', '').strip()
     
     if not code.isdigit() or len(code) != 5:
-        msg = await update.message.reply_text(
+        await update.message.reply_text(
             "❌ کد باید ۵ رقم باشه! مثال: <code>5.1.7.3.2</code>",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
-        user_messages[user_id].append(msg.message_id)
         return
     
-    if user_messages[user_id]:
-        try:
-            await context.bot.delete_message(update.message.chat.id, user_messages[user_id][-1])
-        except:
-            pass
-        user_messages[user_id].pop()
-    
     status_msg = await update.message.reply_text("⏳ در حال تایید کد...", parse_mode='HTML')
-    user_messages[user_id].append(status_msg.message_id)
     
     client = user_temp.get(user_id, {}).get('client')
     if not client:
@@ -611,65 +559,31 @@ async def handle_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     except SessionPasswordNeededError:
         user_states[user_id] = "waiting_password"
-        if user_messages[user_id]:
-            try:
-                await context.bot.delete_message(update.message.chat.id, user_messages[user_id][-1])
-            except:
-                pass
-            user_messages[user_id].pop()
-        
-        msg = await status_msg.edit_text(
+        await status_msg.edit_text(
             "🔑 این اکانت پسورد داره!\n\nلطفاً پسورد رو وارد کن:",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
-        user_messages[user_id].append(msg.message_id)
         
     except PhoneCodeExpiredError:
-        if user_messages[user_id]:
-            try:
-                await context.bot.delete_message(update.message.chat.id, user_messages[user_id][-1])
-            except:
-                pass
-            user_messages[user_id].pop()
-        
-        msg = await status_msg.edit_text(
+        await status_msg.edit_text(
             "❌ کد منقضی شد! در حال ارسال مجدد...",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
-        user_messages[user_id].append(msg.message_id)
-        
         try:
             phone = user_temp.get(user_id, {}).get("phone")
             await client.send_code_request(phone)
-            
-            if user_messages[user_id]:
-                try:
-                    await context.bot.delete_message(update.message.chat.id, user_messages[user_id][-1])
-                except:
-                    pass
-                user_messages[user_id].pop()
-            
-            msg2 = await update.message.reply_text("📨 کد جدید ارسال شد!", reply_markup=back_button(), parse_mode='HTML')
-            user_messages[user_id].append(msg2.message_id)
+            await update.message.reply_text("📨 کد جدید ارسال شد!", reply_markup=back_button(), parse_mode='HTML')
         except Exception as e:
             await status_msg.edit_text(f"❌ خطا: {str(e)}", reply_markup=main_menu(), parse_mode='HTML')
         
     except PhoneCodeInvalidError:
-        if user_messages[user_id]:
-            try:
-                await context.bot.delete_message(update.message.chat.id, user_messages[user_id][-1])
-            except:
-                pass
-            user_messages[user_id].pop()
-        
-        msg = await status_msg.edit_text(
+        await status_msg.edit_text(
             "❌ کد اشتباه! دوباره وارد کن:",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
-        user_messages[user_id].append(msg.message_id)
         user_states[user_id] = "waiting_code"
         
     except Exception as e:
@@ -688,23 +602,14 @@ async def handle_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
     
     if len(password) < 4:
-        msg = await update.message.reply_text(
+        await update.message.reply_text(
             "❌ پسورد حداقل ۴ کاراکتر!",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
-        user_messages[user_id].append(msg.message_id)
         return
     
-    if user_messages[user_id]:
-        try:
-            await context.bot.delete_message(update.message.chat.id, user_messages[user_id][-1])
-        except:
-            pass
-        user_messages[user_id].pop()
-    
     status_msg = await update.message.reply_text("⏳ در حال تایید پسورد...", parse_mode='HTML')
-    user_messages[user_id].append(status_msg.message_id)
     
     client = user_temp.get(user_id, {}).get('client')
     if not client:
@@ -752,25 +657,15 @@ async def get_account_info(update, client, user_id, status_msg):
         db.add_account(phone, username, first_name, last_name, telegram_id, session_file, api_id, api_hash)
         db.add_log(user_id, "add_account", f"Added account {phone}")
         
-        # حذف همه پیام‌های مرحله‌ای
-        chat_id = update.effective_chat.id
-        if user_id in user_messages:
-            for msg_id in user_messages[user_id]:
-                try:
-                    await context.bot.delete_message(chat_id, msg_id)
-                except:
-                    pass
-            del user_messages[user_id]
-        
         # حذف پیام status_msg
         try:
-            await context.bot.delete_message(chat_id, status_msg.message_id)
+            await context.bot.delete_message(update.message.chat.id, status_msg.message_id)
         except:
             pass
         
         # ارسال پیام نهایی موفقیت
         await context.bot.send_message(
-            chat_id=chat_id,
+            chat_id=update.message.chat.id,
             text=f"✅ <b>اکانت با موفقیت اضافه شد!</b>\n\n"
                  f"📱 {phone}\n"
                  f"👤 {first_name} {last_name or ''}\n"
@@ -797,13 +692,14 @@ async def list_accounts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     if not check_user_access(update):
-        await query.edit_message_text("🚫 دسترسی غیرمجاز!", parse_mode='HTML')
+        await query.answer("🚫 دسترسی غیرمجاز!", show_alert=True)
         return
     
     accounts = db.get_accounts()
     if not accounts:
-        await query.edit_message_text(
-            "📭 اکانتی ثبت نشده!",
+        await context.bot.send_message(
+            chat_id=query.message.chat.id,
+            text="📭 اکانتی ثبت نشده!",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
@@ -823,19 +719,29 @@ async def list_accounts(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_menu")]
     ]
     
-    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+    await context.bot.send_message(
+        chat_id=query.message.chat.id,
+        text=text,
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode='HTML'
+    )
 
 async def delete_account_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
     if not check_user_access(update):
-        await query.edit_message_text("🚫 دسترسی غیرمجاز!", parse_mode='HTML')
+        await query.answer("🚫 دسترسی غیرمجاز!", show_alert=True)
         return
     
     accounts = db.get_accounts()
     if not accounts:
-        await query.edit_message_text("📭 اکانتی برای حذف نیست!", reply_markup=back_button(), parse_mode='HTML')
+        await context.bot.send_message(
+            chat_id=query.message.chat.id,
+            text="📭 اکانتی برای حذف نیست!",
+            reply_markup=back_button(),
+            parse_mode='HTML'
+        )
         return
     
     keyboard = []
@@ -843,8 +749,9 @@ async def delete_account_menu(update: Update, context: ContextTypes.DEFAULT_TYPE
         keyboard.append([InlineKeyboardButton(f"🗑 {acc['phone']}", callback_data=f"delete_acc_{i}")])
     keyboard.append([InlineKeyboardButton("🔙 بازگشت", callback_data="list_accounts")])
     
-    await query.edit_message_text(
-        "🗑 انتخاب کن:",
+    await context.bot.send_message(
+        chat_id=query.message.chat.id,
+        text="🗑 انتخاب کن:",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode='HTML'
     )
@@ -854,7 +761,7 @@ async def delete_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     if not check_user_access(update):
-        await query.edit_message_text("🚫 دسترسی غیرمجاز!", parse_mode='HTML')
+        await query.answer("🚫 دسترسی غیرمجاز!", show_alert=True)
         return
     
     user_id = query.from_user.id
@@ -879,8 +786,9 @@ async def delete_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db.delete_account(phone)
     db.add_log(user_id, "delete_account", f"Deleted account {phone}")
     
-    await query.edit_message_text(
-        f"✅ {phone} حذف شد!",
+    await context.bot.send_message(
+        chat_id=query.message.chat.id,
+        text=f"✅ {phone} حذف شد!",
         reply_markup=back_button(),
         parse_mode='HTML'
     )
@@ -892,49 +800,38 @@ async def report_group_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
     
     if not check_user_access(update):
-        await query.edit_message_text("🚫 دسترسی غیرمجاز!", parse_mode='HTML')
+        await query.answer("🚫 دسترسی غیرمجاز!", show_alert=True)
         return
     
     user_id = query.from_user.id
     
-    # پاک کردن پیام‌های قبلی
-    if user_id in user_messages:
-        for msg_id in user_messages[user_id]:
-            try:
-                await context.bot.delete_message(query.message.chat.id, msg_id)
-            except:
-                pass
-        user_messages[user_id] = []
-    else:
-        user_messages[user_id] = []
-    
     accounts = db.get_accounts()
     if len(accounts) < 1:
-        msg = await query.edit_message_text(
-            "⚠️ اول یه اکانت اضافه کن!",
+        await context.bot.send_message(
+            chat_id=query.message.chat.id,
+            text="⚠️ اول یه اکانت اضافه کن!",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
-        user_messages[user_id].append(msg.message_id)
         return
     
     report_temp[user_id] = {}
     user_states[user_id] = "waiting_report_group"
     
-    msg = await query.edit_message_text(
-        "🛡 <b>ریپورت کانال</b>\n\n"
-        "مراحل:\n"
-        "1️⃣ لینک کانال\n"
-        "2️⃣ لینک پست\n"
-        "3️⃣ متن گزارش\n"
-        "4️⃣ تعداد اکانت\n"
-        "5️⃣ تعداد دفعات\n\n"
-        "📎 لینک کانال رو بفرست:\n"
-        "مثال: <code>@username</code> یا <code>https://t.me/username</code>",
+    await context.bot.send_message(
+        chat_id=query.message.chat.id,
+        text="🛡 <b>ریپورت کانال</b>\n\n"
+             "مراحل:\n"
+             "1️⃣ لینک کانال\n"
+             "2️⃣ لینک پست\n"
+             "3️⃣ متن گزارش\n"
+             "4️⃣ تعداد اکانت\n"
+             "5️⃣ تعداد دفعات\n\n"
+             "📎 لینک کانال رو بفرست:\n"
+             "مثال: <code>@username</code> یا <code>https://t.me/username</code>",
         reply_markup=back_button(),
         parse_mode='HTML'
     )
-    user_messages[user_id].append(msg.message_id)
 
 async def handle_report_group_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -959,32 +856,22 @@ async def handle_report_group_link(update: Update, context: ContextTypes.DEFAULT
         username = username[1:]
     
     if not username:
-        msg = await update.message.reply_text(
+        await update.message.reply_text(
             "❌ لینک نامعتبر!",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
-        user_messages[user_id].append(msg.message_id)
         return
     
     report_temp[user_id]["group"] = username
     report_temp[user_id]["group_link"] = link
     user_states[user_id] = "waiting_report_post"
     
-    # حذف پیام قبلی
-    if user_messages[user_id]:
-        try:
-            await context.bot.delete_message(update.message.chat.id, user_messages[user_id][-1])
-        except:
-            pass
-        user_messages[user_id].pop()
-    
-    msg = await update.message.reply_text(
+    await update.message.reply_text(
         f"✅ لینک ثبت شد.\n\n📝 لینک پست رو بفرست:\nمثال: <code>https://t.me/username/123</code>",
         reply_markup=back_button(),
         parse_mode='HTML'
     )
-    user_messages[user_id].append(msg.message_id)
 
 async def handle_report_post_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -1002,31 +889,22 @@ async def handle_report_post_link(update: Update, context: ContextTypes.DEFAULT_
         match = re.search(r'https?://t\.me/c/(\d+)/(\d+)', post_link)
     
     if not match:
-        msg = await update.message.reply_text(
+        await update.message.reply_text(
             "❌ لینک پست نامعتبر!",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
-        user_messages[user_id].append(msg.message_id)
         return
     
     report_temp[user_id]["post_link"] = post_link
     report_temp[user_id]["msg_id"] = int(match.group(2))
     user_states[user_id] = "waiting_report_text"
     
-    if user_messages[user_id]:
-        try:
-            await context.bot.delete_message(update.message.chat.id, user_messages[user_id][-1])
-        except:
-            pass
-        user_messages[user_id].pop()
-    
-    msg = await update.message.reply_text(
+    await update.message.reply_text(
         f"✅ لینک پست ثبت شد.\n\n📄 متن گزارش رو وارد کن:",
         reply_markup=back_button(),
         parse_mode='HTML'
     )
-    user_messages[user_id].append(msg.message_id)
 
 async def handle_report_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -1040,32 +918,23 @@ async def handle_report_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
         pass
     
     if len(report_text) < 10:
-        msg = await update.message.reply_text(
+        await update.message.reply_text(
             "❌ متن حداقل ۱۰ کاراکتر!",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
-        user_messages[user_id].append(msg.message_id)
         return
     
     report_temp[user_id]["text"] = report_text
     user_states[user_id] = "waiting_report_count"
     
-    if user_messages[user_id]:
-        try:
-            await context.bot.delete_message(update.message.chat.id, user_messages[user_id][-1])
-        except:
-            pass
-        user_messages[user_id].pop()
-    
     accounts = db.get_accounts()
     available = len(accounts)
-    msg = await update.message.reply_text(
+    await update.message.reply_text(
         f"✅ متن ثبت شد.\n\n🔢 تعداد اکانت‌ها (حداکثر {available}):",
         reply_markup=back_button(),
         parse_mode='HTML'
     )
-    user_messages[user_id].append(msg.message_id)
 
 async def handle_report_count(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -1083,38 +952,28 @@ async def handle_report_count(update: Update, context: ContextTypes.DEFAULT_TYPE
         available = len(accounts)
         
         if count < 1 or count > available:
-            msg = await update.message.reply_text(
+            await update.message.reply_text(
                 f"❌ بین ۱ تا {available} وارد کن!",
                 reply_markup=back_button(),
                 parse_mode='HTML'
             )
-            user_messages[user_id].append(msg.message_id)
             return
         
         report_temp[user_id]["count"] = count
         user_states[user_id] = "waiting_report_repeat"
         
-        if user_messages[user_id]:
-            try:
-                await context.bot.delete_message(update.message.chat.id, user_messages[user_id][-1])
-            except:
-                pass
-            user_messages[user_id].pop()
-        
-        msg = await update.message.reply_text(
+        await update.message.reply_text(
             f"✅ تعداد: {count}\n\n🔄 تعداد دفعات (۱ تا ۳):",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
-        user_messages[user_id].append(msg.message_id)
         
     except ValueError:
-        msg = await update.message.reply_text(
+        await update.message.reply_text(
             "❌ عدد وارد کن!",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
-        user_messages[user_id].append(msg.message_id)
 
 async def handle_report_repeat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -1130,12 +989,11 @@ async def handle_report_repeat(update: Update, context: ContextTypes.DEFAULT_TYP
         repeat = int(update.message.text.strip())
         
         if repeat < 1 or repeat > 3:
-            msg = await update.message.reply_text(
+            await update.message.reply_text(
                 "❌ بین ۱ تا ۳ وارد کن!",
                 reply_markup=back_button(),
                 parse_mode='HTML'
             )
-            user_messages[user_id].append(msg.message_id)
             return
         
         report_temp[user_id]["repeat"] = repeat
@@ -1159,26 +1017,17 @@ async def handle_report_repeat(update: Update, context: ContextTypes.DEFAULT_TYP
             [InlineKeyboardButton("❌ لغو", callback_data="cancel_report")]
         ]
         
-        if user_messages[user_id]:
-            try:
-                await context.bot.delete_message(update.message.chat.id, user_messages[user_id][-1])
-            except:
-                pass
-            user_messages[user_id].pop()
-        
-        msg = await update.message.reply_text(summary, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
-        user_messages[user_id].append(msg.message_id)
+        await update.message.reply_text(summary, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
         
         if user_id in user_states:
             del user_states[user_id]
         
     except ValueError:
-        msg = await update.message.reply_text(
+        await update.message.reply_text(
             "❌ عدد وارد کن!",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
-        user_messages[user_id].append(msg.message_id)
 
 # ==================== اجرای ریپورت ====================
 
@@ -1194,7 +1043,7 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     if not check_user_access(update):
-        await query.edit_message_text("🚫 دسترسی غیرمجاز!", parse_mode='HTML')
+        await query.answer("🚫 دسترسی غیرمجاز!", show_alert=True)
         return
     
     if user_id in processing_reports:
@@ -1203,14 +1052,15 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     temp = report_temp.get(user_id, {})
     if not temp:
-        await query.edit_message_text("❌ اطلاعات یافت نشد!", reply_markup=main_menu(), parse_mode='HTML')
+        await query.answer("❌ اطلاعات یافت نشد!", show_alert=True)
         return
     
     processing_reports.add(user_id)
     
     try:
-        await query.edit_message_text(
-            "⏳ <b>در حال اجرا...</b>\n\nلطفاً صبر کن...",
+        status_msg = await context.bot.send_message(
+            chat_id=query.message.chat.id,
+            text="⏳ <b>در حال اجرا...</b>\n\nلطفاً صبر کن...",
             parse_mode='HTML'
         )
         
@@ -1224,7 +1074,7 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         accounts = db.get_accounts()[:count]
         
         if len(accounts) < count:
-            await query.edit_message_text("❌ تعداد اکانت کافی نیست!", reply_markup=main_menu(), parse_mode='HTML')
+            await status_msg.edit_text("❌ تعداد اکانت کافی نیست!", reply_markup=main_menu(), parse_mode='HTML')
             return
         
         success = 0
@@ -1358,19 +1208,9 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         db.add_log(user_id, "execute_report", f"Report {report_id} - Success: {success}, Fail: {fail}")
         
-        # حذف همه پیام‌های مرحله‌ای
-        chat_id = update.effective_chat.id
-        if user_id in user_messages:
-            for msg_id in user_messages[user_id]:
-                try:
-                    await context.bot.delete_message(chat_id, msg_id)
-                except:
-                    pass
-            del user_messages[user_id]
-        
-        # حذف پیام Query (دکمه تایید)
+        # حذف پیام وضعیت
         try:
-            await context.bot.delete_message(chat_id, query.message.message_id)
+            await context.bot.delete_message(status_msg.chat.id, status_msg.message_id)
         except:
             pass
         
@@ -1401,7 +1241,7 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # ارسال پیام نهایی
         await context.bot.send_message(
-            chat_id=chat_id,
+            chat_id=query.message.chat.id,
             text=result_text,
             reply_markup=main_menu(),
             parse_mode='HTML'
@@ -1422,7 +1262,12 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     except Exception as e:
         logger.error(f"Report execution error: {e}\n{traceback.format_exc()}")
-        await query.edit_message_text(f"❌ خطا: {str(e)}", reply_markup=main_menu(), parse_mode='HTML')
+        await context.bot.send_message(
+            chat_id=query.message.chat.id,
+            text=f"❌ خطا: {str(e)}",
+            reply_markup=main_menu(),
+            parse_mode='HTML'
+        )
     finally:
         processing_reports.discard(user_id)
         if user_id in report_temp:
@@ -1471,13 +1316,14 @@ async def show_reports(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     if not check_user_access(update):
-        await query.edit_message_text("🚫 دسترسی غیرمجاز!", parse_mode='HTML')
+        await query.answer("🚫 دسترسی غیرمجاز!", show_alert=True)
         return
     
     reports = db.get_reports(10)
     if not reports:
-        await query.edit_message_text(
-            "📭 گزارشی ثبت نشده!",
+        await context.bot.send_message(
+            chat_id=query.message.chat.id,
+            text="📭 گزارشی ثبت نشده!",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
@@ -1490,7 +1336,12 @@ async def show_reports(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += f"   📅 {r.get('created_at', '')[:10]}\n"
         text += "─" * 20 + "\n"
     
-    await query.edit_message_text(text, reply_markup=back_button(), parse_mode='HTML')
+    await context.bot.send_message(
+        chat_id=query.message.chat.id,
+        text=text,
+        reply_markup=back_button(),
+        parse_mode='HTML'
+    )
 
 # ==================== مدیریت ادمین ====================
 
@@ -1499,7 +1350,7 @@ async def manage_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     if not check_user_access(update):
-        await query.edit_message_text("🚫 دسترسی غیرمجاز!", parse_mode='HTML')
+        await query.answer("🚫 دسترسی غیرمجاز!", show_alert=True)
         return
     
     keyboard = [
@@ -1509,8 +1360,9 @@ async def manage_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_menu")]
     ]
     
-    await query.edit_message_text(
-        "👥 مدیریت ادمین:",
+    await context.bot.send_message(
+        chat_id=query.message.chat.id,
+        text="👥 مدیریت ادمین:",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode='HTML'
     )
@@ -1520,12 +1372,13 @@ async def add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     if not check_user_access(update):
-        await query.edit_message_text("🚫 دسترسی غیرمجاز!", parse_mode='HTML')
+        await query.answer("🚫 دسترسی غیرمجاز!", show_alert=True)
         return
     
     user_states[query.from_user.id] = "waiting_admin_id"
-    await query.edit_message_text(
-        "➕ آیدی عددی رو وارد کن:",
+    await context.bot.send_message(
+        chat_id=query.message.chat.id,
+        text="➕ آیدی عددی رو وارد کن:",
         reply_markup=back_button(),
         parse_mode='HTML'
     )
@@ -1573,15 +1426,16 @@ async def remove_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     if not check_user_access(update):
-        await query.edit_message_text("🚫 دسترسی غیرمجاز!", parse_mode='HTML')
+        await query.answer("🚫 دسترسی غیرمجاز!", show_alert=True)
         return
     
     admins = db.get_admins()
     admins = [a for a in admins if a not in ALLOWED_USERS]
     
     if not admins:
-        await query.edit_message_text(
-            "📭 ادمین اضافه‌ای نیست!",
+        await context.bot.send_message(
+            chat_id=query.message.chat.id,
+            text="📭 ادمین اضافه‌ای نیست!",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
@@ -1592,8 +1446,9 @@ async def remove_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard.append([InlineKeyboardButton(f"🗑 {admin}", callback_data=f"remove_adm_{admin}")])
     keyboard.append([InlineKeyboardButton("🔙 بازگشت", callback_data="manage_admins")])
     
-    await query.edit_message_text(
-        "🗑 انتخاب کن:",
+    await context.bot.send_message(
+        chat_id=query.message.chat.id,
+        text="🗑 انتخاب کن:",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode='HTML'
     )
@@ -1603,7 +1458,7 @@ async def remove_admin_confirm(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.answer()
     
     if not check_user_access(update):
-        await query.edit_message_text("🚫 دسترسی غیرمجاز!", parse_mode='HTML')
+        await query.answer("🚫 دسترسی غیرمجاز!", show_alert=True)
         return
     
     user_id = query.from_user.id
@@ -1612,8 +1467,9 @@ async def remove_admin_confirm(update: Update, context: ContextTypes.DEFAULT_TYP
     if db.is_admin(admin_id) and admin_id not in ALLOWED_USERS:
         db.remove_admin(admin_id)
         db.add_log(user_id, "remove_admin", f"Removed admin {admin_id}")
-        await query.edit_message_text(
-            f"✅ {admin_id} حذف شد!",
+        await context.bot.send_message(
+            chat_id=query.message.chat.id,
+            text=f"✅ {admin_id} حذف شد!",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
@@ -1625,7 +1481,7 @@ async def list_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     if not check_user_access(update):
-        await query.edit_message_text("🚫 دسترسی غیرمجاز!", parse_mode='HTML')
+        await query.answer("🚫 دسترسی غیرمجاز!", show_alert=True)
         return
     
     text = "👥 <b>ادمین‌ها:</b>\n\n"
@@ -1643,7 +1499,12 @@ async def list_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         text += "\n📭 اضافه‌ای نیست."
     
-    await query.edit_message_text(text, reply_markup=back_button(), parse_mode='HTML')
+    await context.bot.send_message(
+        chat_id=query.message.chat.id,
+        text=text,
+        reply_markup=back_button(),
+        parse_mode='HTML'
+    )
 
 # ==================== راهنما ====================
 
@@ -1652,7 +1513,7 @@ async def help_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     if not check_user_access(update):
-        await query.edit_message_text("🚫 دسترسی غیرمجاز!", parse_mode='HTML')
+        await query.answer("🚫 دسترسی غیرمجاز!", show_alert=True)
         return
     
     text = """
@@ -1672,7 +1533,12 @@ async def help_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • کد تایید: ۵.۱.۷.۳.۲
 """
     
-    await query.edit_message_text(text, reply_markup=back_button(), parse_mode='HTML')
+    await context.bot.send_message(
+        chat_id=query.message.chat.id,
+        text=text,
+        reply_markup=back_button(),
+        parse_mode='HTML'
+    )
 
 # ==================== دکمه‌های عمومی ====================
 
@@ -1682,14 +1548,14 @@ async def back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     user_id = query.from_user.id
     
-    # فقط پیام رو ویرایش کن، حذف نکن
     if user_id in user_states:
         del user_states[user_id]
     if user_id in user_temp:
         del user_temp[user_id]
     
-    await query.edit_message_text(
-        "🌟 <b>منوی اصلی</b>",
+    await context.bot.send_message(
+        chat_id=query.message.chat.id,
+        text="🌟 <b>منوی اصلی</b>",
         reply_markup=main_menu(),
         parse_mode='HTML'
     )
@@ -1700,23 +1566,14 @@ async def cancel_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     user_id = query.from_user.id
     
-    # حذف پیام‌های مرحله‌ای
-    chat_id = update.effective_chat.id
-    if user_id in user_messages:
-        for msg_id in user_messages[user_id]:
-            try:
-                await context.bot.delete_message(chat_id, msg_id)
-            except:
-                pass
-        del user_messages[user_id]
-    
     if user_id in report_temp:
         del report_temp[user_id]
     if user_id in user_states:
         del user_states[user_id]
     
-    await query.edit_message_text(
-        "❌ لغو شد!",
+    await context.bot.send_message(
+        chat_id=query.message.chat.id,
+        text="❌ لغو شد!",
         reply_markup=main_menu(),
         parse_mode='HTML'
     )
@@ -1791,10 +1648,9 @@ def main():
     print(f"📋 گزارش‌ها: {len(reports)}")
     print("=" * 50)
     print("🔄 در حال اجرا...")
-    print("✅ دکمه بازگشت پیام رو حذف نمیکنه")
-    print("✅ کد تایید: ۵.۱.۷.۳.۲")
-    print("✅ متن‌ها کوتاه و توضیحی")
-    print("✅ چیدمان: ردیف1 یک دکمه | ردیف2 دو دکمه | ردیف3 یک دکمه")
+    print("✅ پیام‌های منو پاک نمیشن")
+    print("✅ همه پیام‌ها جدید ارسال میشن")
+    print("✅ فقط پیام‌های کاربر حذف میشن")
     print("=" * 50)
     
     app.run_polling()
