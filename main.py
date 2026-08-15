@@ -6,6 +6,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 import sqlite3
 import json
+import traceback
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
@@ -18,7 +19,10 @@ from telethon.errors import (
     PhoneCodeExpiredError,
     FloodWaitError,
     UserNotParticipantError,
-    RPCError
+    RPCError,
+    ChannelInvalidError,
+    ChannelPrivateError,
+    UsernameNotOccupiedError
 )
 
 # بارگذاری environment variables
@@ -58,17 +62,15 @@ class Database:
         self.init_db()
     
     def get_connection(self):
-        """دریافت اتصال به دیتابیس"""
         conn = sqlite3.connect(self.db_file)
         conn.row_factory = sqlite3.Row
         return conn
     
     def init_db(self):
-        """ایجاد جداول دیتابیس"""
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        # جدول کاربران (ادمین‌ها)
+        # جدول کاربران
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY,
@@ -81,7 +83,7 @@ class Database:
             )
         ''')
         
-        # جدول اکانت‌های تلگرام
+        # جدول اکانت‌ها
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS accounts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -95,7 +97,8 @@ class Database:
                 api_hash TEXT,
                 created_at TEXT,
                 is_active INTEGER DEFAULT 1,
-                last_used TEXT
+                last_used TEXT,
+                is_valid INTEGER DEFAULT 1
             )
         ''')
         
@@ -126,7 +129,7 @@ class Database:
             )
         ''')
         
-        # جدول لاگ عملیات
+        # جدول لاگ
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -151,7 +154,6 @@ class Database:
     # ==================== توابع کاربران ====================
     
     def add_user(self, user_id, username=None, first_name=None, last_name=None):
-        """افزودن کاربر جدید"""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('''
@@ -162,7 +164,6 @@ class Database:
         conn.close()
     
     def is_admin(self, user_id):
-        """بررسی ادمین بودن کاربر"""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('SELECT is_admin FROM users WHERE user_id = ?', (user_id,))
@@ -171,7 +172,6 @@ class Database:
         return result and result[0] == 1
     
     def get_admins(self):
-        """دریافت لیست ادمین‌ها"""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('SELECT user_id FROM users WHERE is_admin = 1')
@@ -180,7 +180,6 @@ class Database:
         return [row[0] for row in results]
     
     def add_admin(self, user_id):
-        """افزودن ادمین جدید"""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('UPDATE users SET is_admin = 1 WHERE user_id = ?', (user_id,))
@@ -188,7 +187,6 @@ class Database:
         conn.close()
     
     def remove_admin(self, user_id):
-        """حذف ادمین"""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('UPDATE users SET is_admin = 0 WHERE user_id = ?', (user_id,))
@@ -198,29 +196,29 @@ class Database:
     # ==================== توابع اکانت‌ها ====================
     
     def add_account(self, phone, username, first_name, last_name, user_id, session_file, api_id, api_hash):
-        """افزودن اکانت جدید"""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('''
             INSERT OR REPLACE INTO accounts 
-            (phone, username, first_name, last_name, user_id, session_file, api_id, api_hash, created_at, is_active)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (phone, username, first_name, last_name, user_id, session_file, api_id, api_hash, datetime.now().isoformat(), 1))
+            (phone, username, first_name, last_name, user_id, session_file, api_id, api_hash, created_at, is_active, is_valid)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (phone, username, first_name, last_name, user_id, session_file, api_id, api_hash, datetime.now().isoformat(), 1, 1))
         conn.commit()
         conn.close()
         logger.info(f"Account added: {phone}")
     
-    def get_accounts(self):
-        """دریافت لیست همه اکانت‌ها"""
+    def get_accounts(self, only_valid=True):
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute('SELECT * FROM accounts WHERE is_active = 1 ORDER BY id ASC')
+        if only_valid:
+            cursor.execute('SELECT * FROM accounts WHERE is_active = 1 AND is_valid = 1 ORDER BY id ASC')
+        else:
+            cursor.execute('SELECT * FROM accounts WHERE is_active = 1 ORDER BY id ASC')
         results = cursor.fetchall()
         conn.close()
         return [dict(row) for row in results]
     
     def get_account(self, phone):
-        """دریافت یک اکانت با شماره"""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('SELECT * FROM accounts WHERE phone = ? AND is_active = 1', (phone,))
@@ -229,7 +227,6 @@ class Database:
         return dict(result) if result else None
     
     def delete_account(self, phone):
-        """حذف اکانت (غیرفعال کردن)"""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('UPDATE accounts SET is_active = 0 WHERE phone = ?', (phone,))
@@ -237,8 +234,15 @@ class Database:
         conn.close()
         logger.info(f"Account deleted: {phone}")
     
+    def mark_account_invalid(self, phone, reason):
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('UPDATE accounts SET is_valid = 0 WHERE phone = ?', (phone,))
+        conn.commit()
+        conn.close()
+        logger.warning(f"Account marked invalid: {phone} - {reason}")
+    
     def update_account_last_used(self, phone):
-        """بروزرسانی تاریخ آخرین استفاده"""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('UPDATE accounts SET last_used = ? WHERE phone = ?', (datetime.now().isoformat(), phone))
@@ -249,7 +253,6 @@ class Database:
     
     def add_report(self, group_name, group_link, report_text, accounts_count, repeat_count, 
                    success_count, fail_count, total_count, join_results, results, user_id):
-        """ثبت گزارش جدید"""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('''
@@ -268,7 +271,6 @@ class Database:
         return report_id
     
     def get_reports(self, limit=10):
-        """دریافت آخرین گزارشات"""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('''
@@ -286,62 +288,15 @@ class Database:
             reports.append(report)
         return reports
     
-    def get_report(self, report_id):
-        """دریافت یک گزارش با ID"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute('SELECT * FROM reports WHERE id = ?', (report_id,))
-        result = cursor.fetchone()
-        conn.close()
-        if result:
-            report = dict(result)
-            report['join_results'] = json.loads(report['join_results']) if report['join_results'] else []
-            report['results'] = json.loads(report['results']) if report['results'] else []
-            return report
-        return None
-    
     # ==================== توابع لاگ ====================
     
     def add_log(self, user_id, action, details=None):
-        """ثبت لاگ عملیات"""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('''
             INSERT INTO logs (user_id, action, details, created_at)
             VALUES (?, ?, ?, ?)
         ''', (user_id, action, details, datetime.now().isoformat()))
-        conn.commit()
-        conn.close()
-    
-    def get_logs(self, limit=50):
-        """دریافت آخرین لاگ‌ها"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT * FROM logs 
-            ORDER BY id DESC 
-            LIMIT ?
-        ''', (limit,))
-        results = cursor.fetchall()
-        conn.close()
-        return [dict(row) for row in results]
-    
-    # ==================== توابع تنظیمات ====================
-    
-    def get_setting(self, key, default=None):
-        """دریافت تنظیمات"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute('SELECT value FROM settings WHERE key = ?', (key,))
-        result = cursor.fetchone()
-        conn.close()
-        return result[0] if result else default
-    
-    def set_setting(self, key, value):
-        """ذخیره تنظیمات"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', (key, value))
         conn.commit()
         conn.close()
 
@@ -358,13 +313,11 @@ processing_reports = set()
 # ==================== بررسی دسترسی ====================
 
 def is_allowed(user_id):
-    """بررسی دسترسی کاربر"""
     if user_id in ALLOWED_USERS:
         return True
     return db.is_admin(user_id)
 
 def check_user_access(update):
-    """بررسی دسترسی با لاگینگ"""
     user_id = update.effective_user.id
     if not is_allowed(user_id):
         logger.warning(f"Unauthorized access attempt from user {user_id}")
@@ -400,7 +353,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user = update.effective_user
     
-    # ثبت کاربر در دیتابیس
     db.add_user(user_id, user.username, user.first_name, user.last_name)
     
     if not check_user_access(update):
@@ -582,7 +534,7 @@ async def start_connection(user_id, update, status_msg):
     except FloodWaitError as e:
         await status_msg.edit_text(f"⏳ لطفاً {e.seconds} ثانیه صبر کن.", reply_markup=main_menu(), parse_mode='HTML')
     except Exception as e:
-        logger.error(f"Connection error: {e}")
+        logger.error(f"Connection error: {e}\n{traceback.format_exc()}")
         await status_msg.edit_text(f"❌ خطا در اتصال!\n\n{str(e)}", reply_markup=main_menu(), parse_mode='HTML')
 
 async def handle_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -640,7 +592,7 @@ async def handle_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_states[user_id] = "waiting_code"
         
     except Exception as e:
-        logger.error(f"Code verification error: {e}")
+        logger.error(f"Code verification error: {e}\n{traceback.format_exc()}")
         await status_msg.edit_text(f"❌ خطا در تایید کد!\n\n{str(e)}", reply_markup=main_menu(), parse_mode='HTML')
 
 async def handle_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -669,7 +621,7 @@ async def handle_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await client.sign_in(password=password)
         await get_account_info(update, client, user_id, status_msg)
     except Exception as e:
-        logger.error(f"Password error: {e}")
+        logger.error(f"Password error: {e}\n{traceback.format_exc()}")
         await status_msg.edit_text(f"❌ پسورد اشتباه!\n\n{str(e)}", reply_markup=back_button(), parse_mode='HTML')
 
 async def get_account_info(update, client, user_id, status_msg):
@@ -685,7 +637,6 @@ async def get_account_info(update, client, user_id, status_msg):
         api_id = user_temp.get(user_id, {}).get("api_id")
         api_hash = user_temp.get(user_id, {}).get("api_hash")
         
-        # بررسی تکراری نبودن
         existing = db.get_account(phone)
         if existing:
             await status_msg.edit_text("⚠️ این اکانت قبلاً ثبت شده!", reply_markup=main_menu(), parse_mode='HTML')
@@ -696,7 +647,6 @@ async def get_account_info(update, client, user_id, status_msg):
             await client.disconnect()
             return
         
-        # ذخیره در دیتابیس
         db.add_account(phone, username, first_name, last_name, telegram_id, session_file, api_id, api_hash)
         db.add_log(user_id, "add_account", f"Added account {phone}")
         
@@ -718,7 +668,7 @@ async def get_account_info(update, client, user_id, status_msg):
         await client.disconnect()
         
     except Exception as e:
-        logger.error(f"Get account error: {e}")
+        logger.error(f"Get account error: {e}\n{traceback.format_exc()}")
         await status_msg.edit_text(f"❌ خطا: {str(e)}", reply_markup=main_menu(), parse_mode='HTML')
 
 # ==================== لیست و حذف اکانت ====================
@@ -738,7 +688,8 @@ async def list_accounts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     text = "📋 <b>لیست اکانت‌های فعال:</b>\n\n"
     for i, acc in enumerate(accounts, 1):
-        text += f"✅ <b>{i}.</b> 📱 <code>{acc['phone']}</code>\n"
+        status = "✅" if acc.get('is_valid', 1) else "❌"
+        text += f"{status} <b>{i}.</b> 📱 <code>{acc['phone']}</code>\n"
         text += f"   👤 {acc['first_name'] or ''} {acc['last_name'] or ''}\n"
         if acc['username']:
             text += f"   🆔 @{acc['username']}\n"
@@ -790,7 +741,6 @@ async def delete_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
     account = accounts[index]
     phone = account['phone']
     
-    # حذف فایل سشن
     session_file = account.get('session_file')
     if session_file and os.path.exists(session_file):
         try:
@@ -849,7 +799,6 @@ async def handle_report_group_link(update: Update, context: ContextTypes.DEFAULT
     except:
         pass
     
-    # استخراج username از لینک
     username = link
     if 't.me/' in link:
         if '+' in link:
@@ -1018,7 +967,7 @@ async def handle_report_repeat(update: Update, context: ContextTypes.DEFAULT_TYP
     except ValueError:
         await update.message.reply_text("❌ عدد وارد کن!", reply_markup=back_button(), parse_mode='HTML')
 
-# ==================== اجرای ریپورت ====================
+# ==================== اجرای ریپورت (نسخه نهایی) ====================
 
 async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -1078,19 +1027,22 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     join_results.append(f"❌ {account['phone']}: سشن یافت نشد")
                     continue
                 
-                # استفاده از API ID و Hash ذخیره شده
+                # ✅ استفاده از API ID و Hash ذخیره شده - بدون fallback
                 api_id = account.get("api_id")
                 api_hash = account.get("api_hash")
                 
-                if api_id and api_hash:
-                    client = TelegramClient(session_file, int(api_id), api_hash)
-                else:
-                    logger.warning(f"API ID/Hash not found for {account['phone']}, using 0,0")
-                    client = TelegramClient(session_file, 0, 0)
+                if not api_id or not api_hash:
+                    error_msg = f"API credentials missing for {account['phone']}"
+                    logger.error(error_msg)
+                    db.mark_account_invalid(account['phone'], "Missing API credentials")
+                    join_results.append(f"❌ {account['phone']}: اطلاعات API موجود نیست")
+                    continue
                 
+                client = TelegramClient(session_file, int(api_id), api_hash)
                 await client.connect()
                 
                 if not await client.is_user_authorized():
+                    db.mark_account_invalid(account['phone'], "Not authorized")
                     join_results.append(f"❌ {account['phone']}: احراز نشده")
                     await client.disconnect()
                     continue
@@ -1100,22 +1052,27 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     try:
                         await client(functions.channels.JoinChannelRequest(entity))
                         join_results.append(f"✅ {account['phone']}: جوین شد")
+                    except FloodWaitError as e:
+                        join_results.append(f"⏳ {account['phone']}: صبر {e.seconds}s")
+                        await asyncio.sleep(min(e.seconds, 5))
                     except Exception as e:
                         if "already" in str(e).lower():
                             join_results.append(f"⚠️ {account['phone']}: قبلاً جوین بود")
                         else:
-                            join_results.append(f"❌ {account['phone']}: خطا در جوین")
+                            join_results.append(f"❌ {account['phone']}: خطا در جوین - {str(e)[:50]}")
                     await asyncio.sleep(1)
+                except (ChannelInvalidError, ChannelPrivateError, UsernameNotOccupiedError) as e:
+                    join_results.append(f"❌ {account['phone']}: گروه نامعتبر یا خصوصی - {str(e)[:30]}")
                 except Exception as e:
-                    join_results.append(f"❌ {account['phone']}: گروه یافت نشد")
+                    join_results.append(f"❌ {account['phone']}: خطا - {str(e)[:50]}")
                 
                 await client.disconnect()
                 db.update_account_last_used(account['phone'])
                 
             except Exception as e:
-                join_results.append(f"❌ {account['phone']}: خطا - {str(e)}")
+                join_results.append(f"❌ {account['phone']}: خطا - {str(e)[:50]}")
         
-        # مرحله 2: ریپورت
+        # مرحله 2: ریپورت - فقط برای اکانت‌هایی که جوین شده‌اند یا حداقل معتبر هستند
         for account in accounts:
             try:
                 session_file = account.get("session_file")
@@ -1127,12 +1084,12 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 api_id = account.get("api_id")
                 api_hash = account.get("api_hash")
                 
-                if api_id and api_hash:
-                    client = TelegramClient(session_file, int(api_id), api_hash)
-                else:
-                    logger.warning(f"API ID/Hash not found for {account['phone']}, using 0,0")
-                    client = TelegramClient(session_file, 0, 0)
+                if not api_id or not api_hash:
+                    fail += 1
+                    results.append(f"❌ {account['phone']}: اطلاعات API موجود نیست")
+                    continue
                 
+                client = TelegramClient(session_file, int(api_id), api_hash)
                 await client.connect()
                 
                 if not await client.is_user_authorized():
@@ -1143,9 +1100,14 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 try:
                     entity = await client.get_entity(f"@{group}")
+                except (ChannelInvalidError, ChannelPrivateError, UsernameNotOccupiedError) as e:
+                    fail += 1
+                    results.append(f"❌ {account['phone']}: گروه نامعتبر - {str(e)[:30]}")
+                    await client.disconnect()
+                    continue
                 except Exception as e:
                     fail += 1
-                    results.append(f"❌ {account['phone']}: گروه یافت نشد")
+                    results.append(f"❌ {account['phone']}: خطا - {str(e)[:50]}")
                     await client.disconnect()
                     continue
                 
@@ -1158,7 +1120,8 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             message=text
                         ))
                         success += 1
-                        results.append(f"✅ {account['phone']}: ریپورت {i+1} ارسال شد")
+                        # توجه: موفقیت فقط به معنی ارسال درخواست است، نه تایید نهایی توسط تلگرام
+                        results.append(f"✅ {account['phone']}: درخواست ریپورت {i+1} ارسال شد")
                         await asyncio.sleep(2)
                     except FloodWaitError as e:
                         fail += 1
@@ -1166,7 +1129,7 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         await asyncio.sleep(min(e.seconds, 10))
                     except Exception as e:
                         fail += 1
-                        results.append(f"❌ {account['phone']}: خطا در ریپورت {i+1}")
+                        results.append(f"❌ {account['phone']}: خطا در ریپورت {i+1} - {str(e)[:50]}")
                         await asyncio.sleep(1)
                 
                 await client.disconnect()
@@ -1174,7 +1137,7 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
             except Exception as e:
                 fail += 1
-                results.append(f"❌ {account['phone']}: خطا - {str(e)}")
+                results.append(f"❌ {account['phone']}: خطا - {str(e)[:50]}")
         
         # ثبت گزارش در دیتابیس
         report_id = db.add_report(
@@ -1183,16 +1146,18 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
             join_results, results, user_id
         )
         
-        db.add_log(user_id, "execute_report", f"Report {report_id} executed")
+        db.add_log(user_id, "execute_report", f"Report {report_id} executed - Success: {success}, Fail: {fail}")
         
         # نتیجه
         result_text = f"""
 📊 <b>نتیجه ریپورت:</b>
 
 🎯 گروه: {group_link}
-✅ ریپورت ارسال شده: {success}
+✅ درخواست ریپورت ارسال شده: {success}
 ❌ خطا: {fail}
 📋 مجموع تلاش: {success + fail}
+
+⚠️ <b>توجه:</b> "موفق" به معنی ارسال موفق درخواست به تلگرام است، نه تایید نهایی گزارش توسط تلگرام.
 
 📋 <b>وضعیت جوین:</b>
 """
@@ -1227,7 +1192,7 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         })
         
     except Exception as e:
-        logger.error(f"Report execution error: {e}")
+        logger.error(f"Report execution error: {e}\n{traceback.format_exc()}")
         await query.edit_message_text(f"❌ خطا: {str(e)}", reply_markup=main_menu(), parse_mode='HTML')
     finally:
         processing_reports.discard(user_id)
@@ -1245,10 +1210,12 @@ async def send_report_to_channel(context, report_data):
 📝 <b>متن ریپورت:</b> {report_data.get('text', 'نامشخص')}
 🔢 <b>تعداد اکانت‌ها:</b> {report_data.get('accounts', 0)}
 🔄 <b>تعداد دفعات:</b> {report_data.get('repeat', 0)}
-✅ <b>ارسال شده:</b> {report_data.get('success', 0)}
+✅ <b>درخواست ارسال شده:</b> {report_data.get('success', 0)}
 ❌ <b>خطا:</b> {report_data.get('fail', 0)}
 📋 <b>مجموع:</b> {report_data.get('total', 0)}
 📅 <b>تاریخ:</b> {report_data.get('date', '')[:19]}
+
+⚠️ <b>نکته:</b> "موفق" به معنی ارسال موفق درخواست است، نه تایید نهایی تلگرام.
 
 📋 <b>جزئیات:</b>
 """
@@ -1270,7 +1237,7 @@ async def send_report_to_channel(context, report_data):
     except Exception as e:
         logger.error(f"Error sending report to channel: {e}")
 
-# ==================== گزارشات ====================
+# ==================== بقیه توابع ====================
 
 async def show_reports(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -1294,8 +1261,6 @@ async def show_reports(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += "─" * 25 + "\n"
     
     await query.edit_message_text(text, reply_markup=back_button(), parse_mode='HTML')
-
-# ==================== مدیریت ادمین ====================
 
 async def manage_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -1372,7 +1337,6 @@ async def remove_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     admins = db.get_admins()
-    # حذف ادمین‌های اصلی از لیست
     admins = [a for a in admins if a not in ALLOWED_USERS]
     
     if not admins:
@@ -1429,8 +1393,6 @@ async def list_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await query.edit_message_text(text, reply_markup=back_button(), parse_mode='HTML')
 
-# ==================== راهنما ====================
-
 async def help_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -1462,8 +1424,6 @@ async def help_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 """
     
     await query.edit_message_text(text, reply_markup=back_button(), parse_mode='HTML')
-
-# ==================== دکمه‌های عمومی ====================
 
 async def back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -1555,7 +1515,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
     print("=" * 50)
-    print("🤖 ربات مدیریت تلگرام")
+    print("🤖 ربات مدیریت تلگرام - نسخه نهایی")
     print("=" * 50)
     accounts = db.get_accounts()
     admins = db.get_admins()
@@ -1566,7 +1526,10 @@ def main():
     print("=" * 50)
     print("🔄 در حال اجرا...")
     print("✅ دیتابیس SQLite فعال است")
-    print("✅ تمام مشکلات برطرف شد")
+    print("✅ Fallback 0,0 حذف شد")
+    print("✅ مدیریت خطای دقیق اضافه شد")
+    print("✅ توضیح درباره موفقیت گزارش اضافه شد")
+    print("=" * 50)
     
     app.run_polling()
 
