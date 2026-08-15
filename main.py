@@ -33,7 +33,7 @@ TOKEN = os.getenv("BOT_TOKEN")
 if not TOKEN:
     raise ValueError("❌ BOT_TOKEN not found in environment variables!")
 
-OWNER_IDS = [7803165903, 7795617350]
+OWNER_IDS = [7803165903, 7795617350, 649284548]
 REPORT_CHANNEL = os.getenv("REPORT_CHANNEL", "@ValkyrieReport")
 REPORT_CHANNEL_ID = int(os.getenv("REPORT_CHANNEL_ID", "-1004392030066"))
 
@@ -321,6 +321,7 @@ user_temp = {}
 report_temp = {}
 processing_reports = set()
 user_msg_ids = {}
+countdown_tasks = {}
 
 # ==================== تابع سانسور شماره ====================
 
@@ -352,18 +353,79 @@ def check_user_access(update):
 
 def check_admin_report_limit(user_id):
     if is_owner(user_id):
-        return True, None
+        return True, None, None
     
     last_time = db.get_admin_last_report(user_id)
     if last_time:
         last_dt = datetime.fromisoformat(last_time)
-        if datetime.now() - last_dt < timedelta(seconds=ADMIN_REPORT_COOLDOWN):
-            remaining = int((timedelta(seconds=ADMIN_REPORT_COOLDOWN) - (datetime.now() - last_dt)).total_seconds())
+        time_diff = datetime.now() - last_dt
+        if time_diff < timedelta(seconds=ADMIN_REPORT_COOLDOWN):
+            remaining = int((timedelta(seconds=ADMIN_REPORT_COOLDOWN) - time_diff).total_seconds())
             minutes = remaining // 60
             seconds = remaining % 60
-            return False, f"{minutes} دقیقه و {seconds} ثانیه"
+            return False, remaining, f"{minutes} دقیقه و {seconds} ثانیه"
     
-    return True, None
+    return True, None, None
+
+# ==================== تابع شمارش معکوس ====================
+
+async def start_countdown(user_id, message_id, chat_id, context):
+    if user_id in countdown_tasks:
+        countdown_tasks[user_id].cancel()
+    
+    async def countdown_loop():
+        try:
+            while True:
+                last_time = db.get_admin_last_report(user_id)
+                if not last_time:
+                    break
+                
+                last_dt = datetime.fromisoformat(last_time)
+                time_diff = datetime.now() - last_dt
+                remaining = int((timedelta(seconds=ADMIN_REPORT_COOLDOWN) - time_diff).total_seconds())
+                
+                if remaining <= 0:
+                    try:
+                        await context.bot.edit_message_text(
+                            "✅ <b>محدودیت زمانی پایان یافت!</b>\n\n"
+                            "اکنون می‌توانید مجدداً گزارش دهید.",
+                            chat_id=chat_id,
+                            message_id=message_id,
+                            reply_markup=back_button(),
+                            parse_mode='HTML'
+                        )
+                    except:
+                        pass
+                    if user_id in countdown_tasks:
+                        del countdown_tasks[user_id]
+                    break
+                
+                minutes = remaining // 60
+                seconds = remaining % 60
+                
+                try:
+                    await context.bot.edit_message_text(
+                        f"⏳ <b>صبر کنید!</b>\n\n"
+                        f"شما باید <b>{minutes} دقیقه و {seconds} ثانیه</b> صبر کنید تا دوباره بتوانید گزارش بدهید.\n\n"
+                        f"⚠️ این محدودیت برای جلوگیری از اسپم است.",
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        reply_markup=back_button(),
+                        parse_mode='HTML'
+                    )
+                except:
+                    pass
+                
+                await asyncio.sleep(1)
+                
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"Countdown error: {e}")
+    
+    task = asyncio.create_task(countdown_loop())
+    countdown_tasks[user_id] = task
+    return task
 
 # ==================== منوها ====================
 
@@ -411,6 +473,13 @@ async def back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     user_id = query.from_user.id
     user_msg_ids[user_id] = query.message.message_id
+    
+    if user_id in countdown_tasks:
+        try:
+            countdown_tasks[user_id].cancel()
+        except:
+            pass
+        del countdown_tasks[user_id]
     
     if user_id in user_states:
         del user_states[user_id]
@@ -871,7 +940,6 @@ async def get_account_info(update, client, user_id):
         db.add_account(phone, username, first_name, last_name, telegram_id, session_file, api_id, api_hash)
         db.add_log(user_id, "add_account", f"Added account {phone}")
         
-        # ویرایش پیام "در حال تایید پسورد..." به پیام موفقیت
         await update.message.reply_text(
             f"✅ <b>اکانت اضافه شد!</b>\n\n"
             f"📱 <code>{mask_phone(phone)}</code>\n"
@@ -1028,16 +1096,24 @@ async def report_group_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_id = query.from_user.id
     user_msg_ids[user_id] = query.message.message_id
     
+    if user_id in countdown_tasks:
+        try:
+            countdown_tasks[user_id].cancel()
+        except:
+            pass
+        del countdown_tasks[user_id]
+    
     if not is_owner(user_id):
-        can_report, remaining = check_admin_report_limit(user_id)
+        can_report, remaining_seconds, remaining_text = check_admin_report_limit(user_id)
         if not can_report:
-            await query.edit_message_text(
+            msg = await query.edit_message_text(
                 f"⏳ <b>صبر کنید!</b>\n\n"
-                f"شما باید <b>{remaining}</b> صبر کنید تا دوباره بتوانید گزارش بدهید.\n\n"
+                f"شما باید <b>{remaining_text}</b> صبر کنید تا دوباره بتوانید گزارش بدهید.\n\n"
                 f"⚠️ این محدودیت برای جلوگیری از اسپم است.",
                 reply_markup=back_button(),
                 parse_mode='HTML'
             )
+            await start_countdown(user_id, msg.message_id, query.message.chat.id, context)
             return
     
     accounts = db.get_accounts()
@@ -1863,10 +1939,9 @@ async def async_main():
     print(f"📋 گزارش‌ها: {len(reports)}")
     print("=" * 50)
     print("🔄 در حال اجرا...")
+    print("✅ شمارش معکوس دیجیتالی فعال شد")
+    print("✅ آیدی جدید به لیست مالکین اضافه شد")
     print("✅ همه پیام‌ها ویرایشی")
-    print("✅ چیدمان دکمه‌ها مرتب شد")
-    print("✅ سرعت ربات افزایش یافت")
-    print("✅ متن‌های جدید اعمال شدند")
     print("=" * 50)
     
     await app.initialize()
