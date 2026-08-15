@@ -2,7 +2,7 @@ import os
 import re
 import logging
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import sqlite3
 import json
@@ -36,6 +36,9 @@ if not TOKEN:
 OWNER_IDS = [7803165903, 7795617350]
 REPORT_CHANNEL = os.getenv("REPORT_CHANNEL", "@ValkyrieReport")
 REPORT_CHANNEL_ID = int(os.getenv("REPORT_CHANNEL_ID", "-1004392030066"))
+
+# محدودیت گزارش برای ادمین‌ها (به ثانیه)
+ADMIN_REPORT_COOLDOWN = 3600  # 1 ساعت
 
 logging.basicConfig(
     level=logging.INFO,
@@ -129,6 +132,14 @@ class Database:
                 action TEXT,
                 details TEXT,
                 created_at TEXT
+            )
+        ''')
+        
+        # جدول برای ذخیره آخرین زمان گزارش ادمین‌ها
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS admin_report_log (
+                user_id INTEGER PRIMARY KEY,
+                last_report_time TEXT
             )
         ''')
         
@@ -284,6 +295,25 @@ class Database:
         ''', (user_id, action, details, datetime.now().isoformat()))
         conn.commit()
         conn.close()
+    
+    # توابع محدودیت گزارش برای ادمین‌ها
+    def get_admin_last_report(self, user_id):
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT last_report_time FROM admin_report_log WHERE user_id = ?', (user_id,))
+        result = cursor.fetchone()
+        conn.close()
+        return result[0] if result else None
+    
+    def set_admin_last_report(self, user_id):
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT OR REPLACE INTO admin_report_log (user_id, last_report_time)
+            VALUES (?, ?)
+        ''', (user_id, datetime.now().isoformat()))
+        conn.commit()
+        conn.close()
 
 db = Database()
 
@@ -323,6 +353,22 @@ def check_user_access(update):
         return False
     return True
 
+def check_admin_report_limit(user_id):
+    """بررسی محدودیت گزارش برای ادمین‌ها (غیر از مالک)"""
+    if is_owner(user_id):
+        return True, None
+    
+    last_time = db.get_admin_last_report(user_id)
+    if last_time:
+        last_dt = datetime.fromisoformat(last_time)
+        if datetime.now() - last_dt < timedelta(seconds=ADMIN_REPORT_COOLDOWN):
+            remaining = int((timedelta(seconds=ADMIN_REPORT_COOLDOWN) - (datetime.now() - last_dt)).total_seconds())
+            minutes = remaining // 60
+            seconds = remaining % 60
+            return False, f"{minutes} دقیقه و {seconds} ثانیه"
+    
+    return True, None
+
 # ==================== منوها ====================
 
 def main_menu():
@@ -354,7 +400,7 @@ def admin_menu():
             InlineKeyboardButton("📣 کانال گزارشات", url="https://t.me/ValkyrieReport"),
             InlineKeyboardButton("❓ راهنما", callback_data="help")
         ],
-        [InlineKeyboardButton("👨‍💻 برنامه نویس", callback_data="developer")]
+        [InlineKeyboardButton("👨‍💻 درباره تیم", callback_data="developer")]
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -377,8 +423,10 @@ async def back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id in report_temp:
         del report_temp[user_id]
     
+    text = "🌟 <b>منوی اصلی</b>"
+    
     await query.edit_message_text(
-        "🌟 <b>منوی اصلی</b>",
+        text,
         reply_markup=main_menu() if is_owner(user_id) else admin_menu(),
         parse_mode='HTML'
     )
@@ -395,8 +443,10 @@ async def cancel_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id in user_states:
         del user_states[user_id]
     
+    text = "❌ <b>عملیات لغو شد!</b>"
+    
     await query.edit_message_text(
-        "❌ لغو شد!",
+        text,
         reply_markup=main_menu() if is_owner(user_id) else admin_menu(),
         parse_mode='HTML'
     )
@@ -410,25 +460,24 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db.add_user(user_id, user.username, user.first_name, user.last_name)
     
     if not check_user_access(update):
-        await update.message.reply_text("🚫 دسترسی غیرمجاز!", parse_mode='HTML')
+        await update.message.reply_text("🚫 <b>دسترسی غیرمجاز!</b>", parse_mode='HTML')
         return
     
     text = """
-🔥 <b>به ربات ریپورتر والکری خوش آمدید!</b>
+🔥 <b>به ربات ریپورتر والکری خوش آمدید</b>
 
-⚡ <b>ربات حرفه‌ای گزارش‌گیری از کانال‌های تلگرام</b>
+⚡ <b>ابزار حرفه‌ای گزارش‌گیری هوشمند در تلگرام</b>
 
-📌 <b>قابلیت‌ها:</b>
-🛡 ریپورت کانال با چندین اکانت
-➕ افزودن اکانت با سشن
-📋 مدیریت اکانت‌ها
-📊 مشاهده گزارشات
+📌 <b>ویژگی‌های اصلی:</b>
+🛡 ریپورت کانال با استفاده از چندین اکانت
+➕ افزودن سریع سشن (Session)
+📋 مدیریت و مشاهده وضعیت اکانت‌ها
+📊 گزارش‌گیری دقیق و لحظه‌ای
 
-⚠️ <b>نکات:</b>
-• حداقل ۱ اکانت نیاز است
-• API ID و Hash از my.telegram.org
-• کد تایید: ۵.۱.۷.۳.۲
-• شماره‌ها سانسور می‌شوند
+⚠️ <b>پیش‌نیازها:</b>
+• اتصال حداقل ۱ اکانت
+• داشتن API ID و API Hash (از my.telegram.org)
+• سیستم امنیتی: تمامی شماره‌ها بصورت خودکار سانسور می‌شوند
 """
     
     if is_owner(user_id):
@@ -440,7 +489,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_msg_ids[user_id] = msg.message_id
     db.add_log(user_id, "start", "User started bot")
 
-# ==================== برنامه نویس ====================
+# ==================== درباره تیم (برنامه نویس) ====================
 
 async def developer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -450,29 +499,24 @@ async def developer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_msg_ids[user_id] = query.message.message_id
     
     text = """
-👨‍💻 <b>درباره ربات ریپورتر والکری</b>
+🚀 <b>معرفی ربات ریپورتر والکری (Valkyrie Reporter)</b>
 
-⚡ <b>ربات ریپورتر والکری</b>
-یک ربات حرفه‌ای برای گزارش‌گیری از کانال‌های متخلف تلگرام
-با استفاده از چندین اکانت و سشن‌های مختلف.
+والکری، قدرتمندترین ابزار مدیریت گزارش (Report) برای مقابله با کانال‌های متخلف در تلگرام. این ربات با بهره‌گیری از سیستم پیشرفته مالتی-اکانت، فرآیند گزارش‌گیری را به صورت هوشمند و گروهی انجام می‌دهد.
 
-🛡 <b>امکانات:</b>
-• ریپورت گروهی با چندین اکانت
-• افزودن اکانت با سشن
-• مدیریت اکانت‌ها
-• مشاهده تاریخچه گزارشات
+🛠 <b>ویژگی‌های کلیدی:</b>
+• <b>ریپورت دسته‌جمعی:</b> استفاده از چندین سشن (Session) به‌صورت همزمان
+• <b>مدیریت پیشرفته:</b> پنل اختصاصی برای افزودن و مدیریت اکانت‌ها
+• <b>گزارش‌گیری دقیق:</b> مشاهده تاریخچه و وضعیت تمامی گزارش‌های ارسالی
+• <b>پایداری بالا:</b> طراحی شده برای عملکرد بهینه و سریع
 
-👨‍💻 <b>توسعه‌دهنده:</b>
-ربات توسط <b>تیم ریپر ووید</b> توسعه یافته است.
+💻 <b>توسعه یافته توسط:</b> تیم ریپر ووید (Ripper Void)
 
 📞 <b>ارتباط با برنامه‌نویس:</b>
-در صورت بروز مشکل یا نیاز به پشتیبانی، با برنامه‌نویس در ارتباط باشید.
-
-🔗 <b>ارتباط با برنامه‌نویس:</b>
-@XMrAmer
+جهت پشتیبانی و سوالات فنی:
+👉 @XMrAmer
 
 ✅ <b>نسخه:</b> 2.0
-📅 <b>آخرین بروزرسانی:</b> {datetime.now().strftime('%Y-%m-%d')}
+📅 <b>آخرین بروزرسانی:</b> 2024-05-23
 """
     
     await query.edit_message_text(
@@ -488,7 +532,7 @@ async def help_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     if not check_user_access(update):
-        await query.answer("🚫 دسترسی غیرمجاز!", show_alert=True)
+        await query.answer("🚫 <b>دسترسی غیرمجاز!</b>", show_alert=True)
         return
     
     user_id = query.from_user.id
@@ -539,11 +583,11 @@ async def add_account_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     if not check_user_access(update):
-        await query.answer("🚫 دسترسی غیرمجاز!", show_alert=True)
+        await query.answer("🚫 <b>دسترسی غیرمجاز!</b>", show_alert=True)
         return
     
     if not is_owner(query.from_user.id):
-        await query.answer("❌ فقط مالک میتواند اکانت اضافه کند!", show_alert=True)
+        await query.answer("❌ <b>فقط مالک میتواند اکانت اضافه کند!</b>", show_alert=True)
         return
     
     user_id = query.from_user.id
@@ -561,7 +605,7 @@ async def add_account_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 <b>4️⃣ کد تایید</b> (به تلگرام ارسال می‌شود)
 <b>5️⃣ پسورد</b> (در صورت فعال بودن)
 
-📱 شماره تلفن را وارد کنید:
+📱 <b>شماره تلفن را وارد کنید:</b>
 """
     await query.edit_message_text(text, reply_markup=back_button(), parse_mode='HTML')
 
@@ -571,14 +615,14 @@ async def handle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     if not is_owner(user_id):
-        await update.message.reply_text("❌ فقط مالک میتواند اکانت اضافه کند!", reply_markup=main_menu(), parse_mode='HTML')
+        await update.message.reply_text("❌ <b>فقط مالک میتواند اکانت اضافه کند!</b>", reply_markup=main_menu(), parse_mode='HTML')
         return
     
     phone = update.message.text.strip()
     
     if not re.match(r'^\+?[0-9]{10,15}$', phone):
         await update.message.reply_text(
-            "❌ شماره نامعتبر! مثال: <code>+989123456789</code>",
+            "❌ <b>شماره نامعتبر!</b> مثال: <code>+989123456789</code>",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
@@ -588,7 +632,7 @@ async def handle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_states[user_id] = "waiting_api_id"
     
     await update.message.reply_text(
-        f"✅ شماره <code>{mask_phone(phone)}</code> ثبت شد.\n\n"
+        f"✅ <b>شماره</b> <code>{mask_phone(phone)}</code> <b>ثبت شد.</b>\n\n"
         "🔑 <b>API ID</b> را وارد کنید:\n(از my.telegram.org)",
         reply_markup=back_button(),
         parse_mode='HTML'
@@ -608,14 +652,14 @@ async def handle_api_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         api_id_int = int(api_id)
         if api_id_int <= 0 or api_id_int > 2147483647:
             await update.message.reply_text(
-                "❌ API ID باید بین 1 تا 2147483647 باشد!",
+                "❌ <b>API ID باید بین 1 تا 2147483647 باشد!</b>",
                 reply_markup=back_button(),
                 parse_mode='HTML'
             )
             return
     except ValueError:
         await update.message.reply_text(
-            "❌ API ID باید عدد باشد!",
+            "❌ <b>API ID باید عدد باشد!</b>",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
@@ -625,7 +669,7 @@ async def handle_api_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_states[user_id] = "waiting_api_hash"
     
     await update.message.reply_text(
-        f"✅ API ID ثبت شد.\n\n"
+        f"✅ <b>API ID ثبت شد.</b>\n\n"
         "🔐 <b>API Hash</b> را وارد کنید:\n(از my.telegram.org)",
         reply_markup=back_button(),
         parse_mode='HTML'
@@ -643,7 +687,7 @@ async def handle_api_hash(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if len(api_hash) < 20:
         await update.message.reply_text(
-            "❌ API Hash نامعتبر!",
+            "❌ <b>API Hash نامعتبر!</b>",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
@@ -666,7 +710,7 @@ async def start_connection(user_id, update):
     api_hash = temp.get("api_hash")
     
     if not all([phone, api_id, api_hash]):
-        await update.message.reply_text("❌ اطلاعات کامل نیست!", reply_markup=main_menu(), parse_mode='HTML')
+        await update.message.reply_text("❌ <b>اطلاعات کامل نیست!</b>", reply_markup=main_menu(), parse_mode='HTML')
         return
     
     try:
@@ -682,7 +726,7 @@ async def start_connection(user_id, update):
             await update.message.reply_text(
                 f"📨 <b>کد تایید ارسال شد!</b>\n\n"
                 f"📱 <code>{mask_phone(phone)}</code>\n\n"
-                "🔑 کد ۵ رقمی را وارد کنید:\n"
+                "🔑 <b>کد ۵ رقمی</b> را وارد کنید:\n"
                 "⚠️ به صورت <b>۵.۱.۷.۳.۲</b>",
                 reply_markup=back_button(),
                 parse_mode='HTML'
@@ -692,12 +736,12 @@ async def start_connection(user_id, update):
             await get_account_info(update, client, user_id)
             
     except PhoneNumberInvalidError:
-        await update.message.reply_text("❌ شماره معتبر نیست!", reply_markup=main_menu(), parse_mode='HTML')
+        await update.message.reply_text("❌ <b>شماره معتبر نیست!</b>", reply_markup=main_menu(), parse_mode='HTML')
     except FloodWaitError as e:
-        await update.message.reply_text(f"⏳ {e.seconds} ثانیه صبر کنید.", reply_markup=main_menu(), parse_mode='HTML')
+        await update.message.reply_text(f"⏳ <b>{e.seconds} ثانیه صبر کنید.</b>", reply_markup=main_menu(), parse_mode='HTML')
     except Exception as e:
         logger.error(f"Connection error: {e}")
-        await update.message.reply_text(f"❌ خطا: {str(e)}", reply_markup=main_menu(), parse_mode='HTML')
+        await update.message.reply_text(f"❌ <b>خطا:</b> {str(e)}", reply_markup=main_menu(), parse_mode='HTML')
 
 async def handle_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -712,7 +756,7 @@ async def handle_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if not code.isdigit() or len(code) != 5:
         await update.message.reply_text(
-            "❌ کد ۵ رقم باشد! مثال: <code>5.1.7.3.2</code>",
+            "❌ <b>کد ۵ رقم باشد!</b> مثال: <code>5.1.7.3.2</code>",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
@@ -722,7 +766,7 @@ async def handle_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     client = user_temp.get(user_id, {}).get('client')
     if not client:
-        await update.message.reply_text("❌ خطا در اتصال!", reply_markup=main_menu(), parse_mode='HTML')
+        await update.message.reply_text("❌ <b>خطا در اتصال!</b>", reply_markup=main_menu(), parse_mode='HTML')
         return
     
     try:
@@ -732,27 +776,27 @@ async def handle_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except SessionPasswordNeededError:
         user_states[user_id] = "waiting_password"
         await update.message.reply_text(
-            "🔑 <b>این اکانت پسورد دارد!</b>\n\nلطفاً پسورد را وارد کنید:",
+            "🔑 <b>این اکانت پسورد دارد!</b>\n\nلطفاً <b>پسورد</b> را وارد کنید:",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
         
     except PhoneCodeExpiredError:
         await update.message.reply_text(
-            "❌ کد منقضی شد! در حال ارسال مجدد...",
+            "❌ <b>کد منقضی شد!</b> در حال ارسال مجدد...",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
         try:
             phone = user_temp.get(user_id, {}).get("phone")
             await client.send_code_request(phone)
-            await update.message.reply_text("📨 کد جدید ارسال شد!", reply_markup=back_button(), parse_mode='HTML')
+            await update.message.reply_text("📨 <b>کد جدید ارسال شد!</b>", reply_markup=back_button(), parse_mode='HTML')
         except Exception as e:
-            await update.message.reply_text(f"❌ خطا: {str(e)}", reply_markup=main_menu(), parse_mode='HTML')
+            await update.message.reply_text(f"❌ <b>خطا:</b> {str(e)}", reply_markup=main_menu(), parse_mode='HTML')
         
     except PhoneCodeInvalidError:
         await update.message.reply_text(
-            "❌ کد اشتباه! دوباره وارد کنید:",
+            "❌ <b>کد اشتباه!</b> دوباره وارد کنید:",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
@@ -760,7 +804,7 @@ async def handle_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     except Exception as e:
         logger.error(f"Code error: {e}")
-        await update.message.reply_text(f"❌ خطا: {str(e)}", reply_markup=main_menu(), parse_mode='HTML')
+        await update.message.reply_text(f"❌ <b>خطا:</b> {str(e)}", reply_markup=main_menu(), parse_mode='HTML')
 
 async def handle_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -774,7 +818,7 @@ async def handle_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if len(password) < 4:
         await update.message.reply_text(
-            "❌ پسورد حداقل ۴ کاراکتر!",
+            "❌ <b>پسورد حداقل ۴ کاراکتر!</b>",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
@@ -784,7 +828,7 @@ async def handle_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     client = user_temp.get(user_id, {}).get('client')
     if not client:
-        await update.message.reply_text("❌ خطا در اتصال!", reply_markup=main_menu(), parse_mode='HTML')
+        await update.message.reply_text("❌ <b>خطا در اتصال!</b>", reply_markup=main_menu(), parse_mode='HTML')
         return
     
     try:
@@ -793,7 +837,7 @@ async def handle_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Password error: {e}")
         await update.message.reply_text(
-            f"❌ پسورد اشتباه!\n\n{str(e)}",
+            f"❌ <b>پسورد اشتباه!</b>\n\n{str(e)}",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
@@ -814,7 +858,7 @@ async def get_account_info(update, client, user_id):
         existing = db.get_account(phone)
         if existing:
             await update.message.reply_text(
-                "⚠️ این اکانت قبلاً ثبت شده!",
+                "⚠️ <b>این اکانت قبلاً ثبت شده!</b>",
                 reply_markup=main_menu(),
                 parse_mode='HTML'
             )
@@ -847,7 +891,7 @@ async def get_account_info(update, client, user_id):
         
     except Exception as e:
         logger.error(f"Get account error: {e}")
-        await update.message.reply_text(f"❌ خطا: {str(e)}", reply_markup=main_menu(), parse_mode='HTML')
+        await update.message.reply_text(f"❌ <b>خطا:</b> {str(e)}", reply_markup=main_menu(), parse_mode='HTML')
 
 # ==================== لیست اکانت‌ها ====================
 
@@ -856,7 +900,7 @@ async def list_accounts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     if not check_user_access(update):
-        await query.answer("🚫 دسترسی غیرمجاز!", show_alert=True)
+        await query.answer("🚫 <b>دسترسی غیرمجاز!</b>", show_alert=True)
         return
     
     user_id = query.from_user.id
@@ -864,8 +908,9 @@ async def list_accounts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     accounts = db.get_accounts()
     if not accounts:
+        text = "📭 <b>هیچ اکانتی ثبت نشده!</b>"
         await query.edit_message_text(
-            "📭 <b>هیچ اکانتی ثبت نشده!</b>",
+            text,
             reply_markup=back_button(),
             parse_mode='HTML'
         )
@@ -896,12 +941,12 @@ async def delete_account_menu(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.answer()
     
     if not check_user_access(update):
-        await query.answer("🚫 دسترسی غیرمجاز!", show_alert=True)
+        await query.answer("🚫 <b>دسترسی غیرمجاز!</b>", show_alert=True)
         return
     
     user_id = query.from_user.id
     if not is_owner(user_id):
-        await query.answer("❌ فقط مالک میتواند اکانت حذف کند!", show_alert=True)
+        await query.answer("❌ <b>فقط مالک میتواند اکانت حذف کند!</b>", show_alert=True)
         return
     
     user_msg_ids[user_id] = query.message.message_id
@@ -909,7 +954,7 @@ async def delete_account_menu(update: Update, context: ContextTypes.DEFAULT_TYPE
     accounts = db.get_accounts()
     if not accounts:
         await query.edit_message_text(
-            "📭 اکانتی برای حذف نیست!",
+            "📭 <b>اکانتی برای حذف نیست!</b>",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
@@ -921,7 +966,7 @@ async def delete_account_menu(update: Update, context: ContextTypes.DEFAULT_TYPE
     keyboard.append([InlineKeyboardButton("🔙 بازگشت", callback_data="list_accounts")])
     
     await query.edit_message_text(
-        "🗑 انتخاب کنید:",
+        "🗑 <b>انتخاب کنید:</b>",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode='HTML'
     )
@@ -931,12 +976,12 @@ async def delete_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     if not check_user_access(update):
-        await query.answer("🚫 دسترسی غیرمجاز!", show_alert=True)
+        await query.answer("🚫 <b>دسترسی غیرمجاز!</b>", show_alert=True)
         return
     
     user_id = query.from_user.id
     if not is_owner(user_id):
-        await query.answer("❌ فقط مالک میتواند اکانت حذف کند!", show_alert=True)
+        await query.answer("❌ <b>فقط مالک میتواند اکانت حذف کند!</b>", show_alert=True)
         return
     
     user_msg_ids[user_id] = query.message.message_id
@@ -944,7 +989,7 @@ async def delete_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     accounts = db.get_accounts()
     if index >= len(accounts):
-        await query.answer("❌ یافت نشد!", show_alert=True)
+        await query.answer("❌ <b>یافت نشد!</b>", show_alert=True)
         return
     
     account = accounts[index]
@@ -961,7 +1006,7 @@ async def delete_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db.add_log(user_id, "delete_account", f"Deleted account {phone}")
     
     await query.edit_message_text(
-        f"✅ <code>{mask_phone(phone)}</code> حذف شد!",
+        f"✅ <code>{mask_phone(phone)}</code> <b>حذف شد!</b>",
         reply_markup=back_button(),
         parse_mode='HTML'
     )
@@ -973,11 +1018,24 @@ async def report_group_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
     
     if not check_user_access(update):
-        await query.answer("🚫 دسترسی غیرمجاز!", show_alert=True)
+        await query.answer("🚫 <b>دسترسی غیرمجاز!</b>", show_alert=True)
         return
     
     user_id = query.from_user.id
     user_msg_ids[user_id] = query.message.message_id
+    
+    # بررسی محدودیت برای ادمین‌ها
+    if not is_owner(user_id):
+        can_report, remaining = check_admin_report_limit(user_id)
+        if not can_report:
+            await query.edit_message_text(
+                f"⏳ <b>صبر کنید!</b>\n\n"
+                f"شما باید <b>{remaining}</b> صبر کنید تا دوباره بتوانید گزارش بدهید.\n\n"
+                f"⚠️ این محدودیت برای جلوگیری از اسپم است.",
+                reply_markup=back_button(),
+                parse_mode='HTML'
+            )
+            return
     
     accounts = db.get_accounts()
     if len(accounts) < 1:
@@ -1001,13 +1059,13 @@ async def report_group_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     await query.edit_message_text(
         "🛡 <b>ریپورت کانال</b>\n\n"
-        "مراحل:\n"
+        "<b>مراحل:</b>\n"
         "1️⃣ لینک کانال\n"
         "2️⃣ لینک پست‌ها (چندتایی)\n"
         "3️⃣ متن گزارش (چندتایی)\n"
         "4️⃣ تعداد اکانت\n"
         "5️⃣ تعداد دفعات\n\n"
-        "📎 لینک کانال را بفرستید:\n"
+        "📎 <b>لینک کانال</b> را بفرستید:\n"
         "مثال: <code>@username</code> یا <code>https://t.me/username</code>",
         reply_markup=back_button(),
         parse_mode='HTML'
@@ -1033,7 +1091,7 @@ async def handle_report_group_link(update: Update, context: ContextTypes.DEFAULT
     
     if not username:
         await update.message.reply_text(
-            "❌ لینک نامعتبر!",
+            "❌ <b>لینک نامعتبر!</b>",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
@@ -1045,10 +1103,10 @@ async def handle_report_group_link(update: Update, context: ContextTypes.DEFAULT
     user_states[user_id] = "waiting_report_post"
     
     await update.message.reply_text(
-        f"✅ لینک کانال ثبت شد.\n\n"
-        "📝 لینک پست را بفرستید:\n"
+        f"✅ <b>لینک کانال ثبت شد.</b>\n\n"
+        "📝 <b>لینک پست</b> را بفرستید:\n"
         "مثال: <code>https://t.me/username/123</code>\n\n"
-        "💡 می‌توانید چندین لینک بفرستید.\n"
+        "💡 می‌توانید <b>چندین لینک</b> بفرستید.\n"
         "پس از اتمام، روی دکمه زیر کلیک کنید.",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ پست دیگری ندارم", callback_data="no_more_posts")]
@@ -1069,7 +1127,7 @@ async def handle_report_post_link(update: Update, context: ContextTypes.DEFAULT_
     
     if not match:
         await update.message.reply_text(
-            "❌ لینک پست نامعتبر!",
+            "❌ <b>لینک پست نامعتبر!</b>",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("✅ پست دیگری ندارم", callback_data="no_more_posts")]
             ]),
@@ -1085,8 +1143,8 @@ async def handle_report_post_link(update: Update, context: ContextTypes.DEFAULT_
         report_temp[user_id]["posts"].append(msg_id)
     
     await update.message.reply_text(
-        f"✅ لینک پست ثبت شد! (تعداد: {len(report_temp[user_id]['posts'])})\n\n"
-        "لینک بعدی را بفرستید یا روی دکمه زیر کلیک کنید.",
+        f"✅ <b>لینک پست ثبت شد!</b> (تعداد: {len(report_temp[user_id]['posts'])})\n\n"
+        "📎 لینک بعدی را بفرستید یا روی دکمه زیر کلیک کنید.",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ پست دیگری ندارم", callback_data="no_more_posts")]
         ]),
@@ -1099,12 +1157,12 @@ async def no_more_posts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     user_id = query.from_user.id
     if user_id not in user_states or user_states[user_id] != "waiting_report_post":
-        await query.answer("⚠️ در این مرحله نیستید!", show_alert=True)
+        await query.answer("⚠️ <b>در این مرحله نیستید!</b>", show_alert=True)
         return
     
     if "posts" not in report_temp[user_id] or not report_temp[user_id]["posts"]:
         await query.edit_message_text(
-            "❌ هیچ لینک پستی ارسال نکرده‌اید!",
+            "❌ <b>هیچ لینک پستی ارسال نکرده‌اید!</b>",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
@@ -1115,9 +1173,9 @@ async def no_more_posts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await query.edit_message_text(
         f"✅ <b>{len(report_temp[user_id]['posts'])}</b> لینک پست ثبت شد.\n\n"
-        "📄 متن گزارش را وارد کنید:\n"
+        "📄 <b>متن گزارش</b> را وارد کنید:\n"
         "مثال: <i>این کانال کلاهبرداری است</i>\n\n"
-        "💡 می‌توانید چندین متن بفرستید.\n"
+        "💡 می‌توانید <b>چندین متن</b> بفرستید.\n"
         "پس از اتمام، روی دکمه زیر کلیک کنید.",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ متن دیگری ندارم", callback_data="no_more_texts")]
@@ -1134,7 +1192,7 @@ async def handle_report_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     if len(report_text) < 10:
         await update.message.reply_text(
-            "❌ متن حداقل ۱۰ کاراکتر!",
+            "❌ <b>متن حداقل ۱۰ کاراکتر!</b>",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("✅ متن دیگری ندارم", callback_data="no_more_texts")]
             ]),
@@ -1149,8 +1207,8 @@ async def handle_report_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
         report_temp[user_id]["report_texts"].append(report_text)
     
     await update.message.reply_text(
-        f"✅ متن ثبت شد! (تعداد: {len(report_temp[user_id]['report_texts'])})\n\n"
-        "متن بعدی را بفرستید یا روی دکمه زیر کلیک کنید.",
+        f"✅ <b>متن ثبت شد!</b> (تعداد: {len(report_temp[user_id]['report_texts'])})\n\n"
+        "📎 متن بعدی را بفرستید یا روی دکمه زیر کلیک کنید.",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ متن دیگری ندارم", callback_data="no_more_texts")]
         ]),
@@ -1163,12 +1221,12 @@ async def no_more_texts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     user_id = query.from_user.id
     if user_id not in user_states or user_states[user_id] != "waiting_report_text":
-        await query.answer("⚠️ در این مرحله نیستید!", show_alert=True)
+        await query.answer("⚠️ <b>در این مرحله نیستید!</b>", show_alert=True)
         return
     
     if "report_texts" not in report_temp[user_id] or not report_temp[user_id]["report_texts"]:
         await query.edit_message_text(
-            "❌ هیچ متن گزارشی ارسال نکرده‌اید!",
+            "❌ <b>هیچ متن گزارشی ارسال نکرده‌اید!</b>",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
@@ -1182,8 +1240,8 @@ async def no_more_texts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await query.edit_message_text(
         f"✅ <b>{len(report_temp[user_id]['report_texts'])}</b> متن ثبت شد.\n\n"
-        f"📊 تعداد اکانت‌ها: <b>{available}</b>\n\n"
-        f"🔢 تعداد اکانت‌ها را وارد کنید (حداکثر {available}):",
+        f"📊 <b>تعداد اکانت‌ها:</b> {available}\n\n"
+        f"🔢 <b>تعداد اکانت‌ها</b> را وارد کنید (حداکثر {available}):",
         reply_markup=back_button(),
         parse_mode='HTML'
     )
@@ -1200,7 +1258,7 @@ async def handle_report_count(update: Update, context: ContextTypes.DEFAULT_TYPE
         
         if count < 1 or count > available:
             await update.message.reply_text(
-                f"❌ بین ۱ تا {available} وارد کنید!",
+                f"❌ <b>بین ۱ تا {available} وارد کنید!</b>",
                 reply_markup=back_button(),
                 parse_mode='HTML'
             )
@@ -1211,15 +1269,15 @@ async def handle_report_count(update: Update, context: ContextTypes.DEFAULT_TYPE
         user_states[user_id] = "waiting_report_repeat"
         
         await update.message.reply_text(
-            f"✅ تعداد: <b>{count}</b>\n\n"
-            "🔄 تعداد دفعات (۱ تا ۳):",
+            f"✅ <b>تعداد:</b> {count}\n\n"
+            "🔄 <b>تعداد دفعات</b> (۱ تا ۳):",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
         
     except ValueError:
         await update.message.reply_text(
-            "❌ عدد وارد کنید!",
+            "❌ <b>عدد وارد کنید!</b>",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
@@ -1234,7 +1292,7 @@ async def handle_report_repeat(update: Update, context: ContextTypes.DEFAULT_TYP
         
         if repeat < 1 or repeat > 3:
             await update.message.reply_text(
-                "❌ بین ۱ تا ۳ وارد کنید!",
+                "❌ <b>بین ۱ تا ۳ وارد کنید!</b>",
                 reply_markup=back_button(),
                 parse_mode='HTML'
             )
@@ -1247,13 +1305,13 @@ async def handle_report_repeat(update: Update, context: ContextTypes.DEFAULT_TYP
         summary = f"""
 📋 <b>خلاصه:</b>
 
-🎯 کانال: {temp.get('group_link', 'نامشخص')}
-📝 پست‌ها: {len(temp.get('posts', []))}
-📄 متن‌ها: {len(temp.get('report_texts', []))}
-🔢 اکانت‌ها: {temp.get('count', 0)}
-🔄 دفعات: {temp.get('repeat', 0)}
+🎯 <b>کانال:</b> {temp.get('group_link', 'نامشخص')}
+📝 <b>پست‌ها:</b> {len(temp.get('posts', []))}
+📄 <b>متن‌ها:</b> {len(temp.get('report_texts', []))}
+🔢 <b>اکانت‌ها:</b> {temp.get('count', 0)}
+🔄 <b>دفعات:</b> {temp.get('repeat', 0)}
 
-⚠️ تایید میکنی؟
+⚠️ <b>تایید میکنی؟</b>
 """
         
         keyboard = [
@@ -1268,7 +1326,7 @@ async def handle_report_repeat(update: Update, context: ContextTypes.DEFAULT_TYP
         
     except ValueError:
         await update.message.reply_text(
-            "❌ عدد وارد کنید!",
+            "❌ <b>عدد وارد کنید!</b>",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
@@ -1284,21 +1342,25 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_msg_ids[user_id] = query.message.message_id
     
     if user_id != target_user_id:
-        await query.answer("❌ این دکمه مال تو نیست!", show_alert=True)
+        await query.answer("❌ <b>این دکمه مال تو نیست!</b>", show_alert=True)
         return
     
     if not check_user_access(update):
-        await query.answer("🚫 دسترسی غیرمجاز!", show_alert=True)
+        await query.answer("🚫 <b>دسترسی غیرمجاز!</b>", show_alert=True)
         return
     
     if user_id in processing_reports:
-        await query.answer("⏳ در حال اجراست!", show_alert=True)
+        await query.answer("⏳ <b>در حال اجراست!</b>", show_alert=True)
         return
     
     temp = report_temp.get(user_id, {})
     if not temp:
-        await query.edit_message_text("❌ اطلاعات یافت نشد!", reply_markup=main_menu() if is_owner(user_id) else admin_menu(), parse_mode='HTML')
+        await query.edit_message_text("❌ <b>اطلاعات یافت نشد!</b>", reply_markup=main_menu() if is_owner(user_id) else admin_menu(), parse_mode='HTML')
         return
+    
+    # ثبت زمان گزارش برای ادمین‌ها
+    if not is_owner(user_id):
+        db.set_admin_last_report(user_id)
     
     processing_reports.add(user_id)
     
@@ -1318,7 +1380,7 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         accounts = db.get_accounts()[:count]
         
         if len(accounts) < count:
-            await query.edit_message_text("❌ تعداد اکانت کافی نیست!", reply_markup=main_menu() if is_owner(user_id) else admin_menu(), parse_mode='HTML')
+            await query.edit_message_text("❌ <b>تعداد اکانت کافی نیست!</b>", reply_markup=main_menu() if is_owner(user_id) else admin_menu(), parse_mode='HTML')
             return
         
         total_success = 0
@@ -1406,13 +1468,13 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
 📊 <b>نتیجه:</b>
 
 🎯 {group_link}
-📝 پست‌ها: {len(posts)}
-📄 متن‌ها: {len(report_texts)}
-✅ موفق: {total_success}
-❌ خطا: {total_fail}
-📋 مجموع: {total_success + total_fail}
+📝 <b>پست‌ها:</b> {len(posts)}
+📄 <b>متن‌ها:</b> {len(report_texts)}
+✅ <b>موفق:</b> {total_success}
+❌ <b>خطا:</b> {total_fail}
+📋 <b>مجموع:</b> {total_success + total_fail}
 
-📋 نتیجه ریپورت:
+📋 <b>نتیجه ریپورت:</b>
 """
         
         for r in all_results[:5]:
@@ -1442,7 +1504,7 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     except Exception as e:
         logger.error(f"Report execution error: {e}")
-        await query.edit_message_text(f"❌ خطا: {str(e)}", reply_markup=main_menu() if is_owner(user_id) else admin_menu(), parse_mode='HTML')
+        await query.edit_message_text(f"❌ <b>خطا:</b> {str(e)}", reply_markup=main_menu() if is_owner(user_id) else admin_menu(), parse_mode='HTML')
     finally:
         processing_reports.discard(user_id)
         if user_id in report_temp:
@@ -1454,13 +1516,13 @@ async def send_report_to_channel(context, report_data):
 📊 <b>گزارش جدید</b>
 
 🎯 {report_data.get('group_link', 'نامشخص')}
-📝 پست‌ها: {report_data.get('posts_count', 0)}
-📄 متن‌ها: {report_data.get('texts_count', 0)}
-🔢 اکانت‌ها: {report_data.get('accounts', 0)}
-🔄 دفعات: {report_data.get('repeat', 0)}
-✅ موفق: {report_data.get('success', 0)}
-❌ خطا: {report_data.get('fail', 0)}
-📋 مجموع: {report_data.get('total', 0)}
+📝 <b>پست‌ها:</b> {report_data.get('posts_count', 0)}
+📄 <b>متن‌ها:</b> {report_data.get('texts_count', 0)}
+🔢 <b>اکانت‌ها:</b> {report_data.get('accounts', 0)}
+🔄 <b>دفعات:</b> {report_data.get('repeat', 0)}
+✅ <b>موفق:</b> {report_data.get('success', 0)}
+❌ <b>خطا:</b> {report_data.get('fail', 0)}
+📋 <b>مجموع:</b> {report_data.get('total', 0)}
 📅 {report_data.get('date', '')[:19]}
 """
         
@@ -1486,7 +1548,7 @@ async def show_reports(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     if not check_user_access(update):
-        await query.answer("🚫 دسترسی غیرمجاز!", show_alert=True)
+        await query.answer("🚫 <b>دسترسی غیرمجاز!</b>", show_alert=True)
         return
     
     user_id = query.from_user.id
@@ -1504,8 +1566,8 @@ async def show_reports(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = "📊 <b>تاریخچه:</b>\n\n"
     for i, r in enumerate(reports[:5], 1):
         text += f"{i}. 🎯 {r.get('group_name', 'نامشخص')}\n"
-        text += f"   ✅ موفق: {r.get('success_count', 0)}\n"
-        text += f"   ❌ خطا: {r.get('fail_count', 0)}\n"
+        text += f"   ✅ <b>موفق:</b> {r.get('success_count', 0)}\n"
+        text += f"   ❌ <b>خطا:</b> {r.get('fail_count', 0)}\n"
         text += f"   📅 {r.get('created_at', '')[:10]}\n"
         text += "─" * 30 + "\n"
     
@@ -1522,12 +1584,12 @@ async def manage_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     if not check_user_access(update):
-        await query.answer("🚫 دسترسی غیرمجاز!", show_alert=True)
+        await query.answer("🚫 <b>دسترسی غیرمجاز!</b>", show_alert=True)
         return
     
     user_id = query.from_user.id
     if not is_owner(user_id):
-        await query.answer("❌ فقط مالک میتواند ادمین مدیریت کند!", show_alert=True)
+        await query.answer("❌ <b>فقط مالک میتواند ادمین مدیریت کند!</b>", show_alert=True)
         return
     
     user_msg_ids[user_id] = query.message.message_id
@@ -1550,19 +1612,19 @@ async def add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     if not check_user_access(update):
-        await query.answer("🚫 دسترسی غیرمجاز!", show_alert=True)
+        await query.answer("🚫 <b>دسترسی غیرمجاز!</b>", show_alert=True)
         return
     
     user_id = query.from_user.id
     if not is_owner(user_id):
-        await query.answer("❌ فقط مالک میتواند ادمین اضافه کند!", show_alert=True)
+        await query.answer("❌ <b>فقط مالک میتواند ادمین اضافه کند!</b>", show_alert=True)
         return
     
     user_msg_ids[user_id] = query.message.message_id
     user_states[user_id] = "waiting_admin_id"
     
     await query.edit_message_text(
-        "➕ <b>افزودن ادمین</b>\n\n🆔 آیدی عددی را وارد کنید:",
+        "➕ <b>افزودن ادمین</b>\n\n🆔 <b>آیدی عددی</b> را وارد کنید:",
         reply_markup=back_button(),
         parse_mode='HTML'
     )
@@ -1579,18 +1641,18 @@ async def handle_add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         admin_id = int(update.message.text.strip())
         
         if db.is_admin(admin_id):
-            await update.message.reply_text("⚠️ قبلاً ادمین هست!", reply_markup=main_menu(), parse_mode='HTML')
+            await update.message.reply_text("⚠️ <b>قبلاً ادمین هست!</b>", reply_markup=main_menu(), parse_mode='HTML')
             return
         
         if admin_id in OWNER_IDS:
-            await update.message.reply_text("⚠️ این کاربر مالک است!", reply_markup=main_menu(), parse_mode='HTML')
+            await update.message.reply_text("⚠️ <b>این کاربر مالک است!</b>", reply_markup=main_menu(), parse_mode='HTML')
             return
         
         db.add_admin(admin_id)
         db.add_log(user_id, "add_admin", f"Added admin {admin_id}")
         
         await update.message.reply_text(
-            f"✅ ادمین <code>{admin_id}</code> اضافه شد!",
+            f"✅ <b>ادمین</b> <code>{admin_id}</code> <b>اضافه شد!</b>",
             reply_markup=main_menu(),
             parse_mode='HTML'
         )
@@ -1598,7 +1660,7 @@ async def handle_add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
     except ValueError:
         await update.message.reply_text(
-            "❌ عدد وارد کنید!",
+            "❌ <b>عدد وارد کنید!</b>",
             reply_markup=main_menu(),
             parse_mode='HTML'
         )
@@ -1608,12 +1670,12 @@ async def remove_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     if not check_user_access(update):
-        await query.answer("🚫 دسترسی غیرمجاز!", show_alert=True)
+        await query.answer("🚫 <b>دسترسی غیرمجاز!</b>", show_alert=True)
         return
     
     user_id = query.from_user.id
     if not is_owner(user_id):
-        await query.answer("❌ فقط مالک میتواند ادمین حذف کند!", show_alert=True)
+        await query.answer("❌ <b>فقط مالک میتواند ادمین حذف کند!</b>", show_alert=True)
         return
     
     user_msg_ids[user_id] = query.message.message_id
@@ -1623,7 +1685,7 @@ async def remove_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if not admins:
         await query.edit_message_text(
-            "📭 ادمین اضافه‌ای نیست!",
+            "📭 <b>ادمین اضافه‌ای نیست!</b>",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
@@ -1635,7 +1697,7 @@ async def remove_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard.append([InlineKeyboardButton("🔙 بازگشت", callback_data="manage_admins")])
     
     await query.edit_message_text(
-        "🗑 انتخاب کنید:",
+        "🗑 <b>انتخاب کنید:</b>",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode='HTML'
     )
@@ -1645,12 +1707,12 @@ async def remove_admin_confirm(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.answer()
     
     if not check_user_access(update):
-        await query.answer("🚫 دسترسی غیرمجاز!", show_alert=True)
+        await query.answer("🚫 <b>دسترسی غیرمجاز!</b>", show_alert=True)
         return
     
     user_id = query.from_user.id
     if not is_owner(user_id):
-        await query.answer("❌ فقط مالک میتواند ادمین حذف کند!", show_alert=True)
+        await query.answer("❌ <b>فقط مالک میتواند ادمین حذف کند!</b>", show_alert=True)
         return
     
     user_msg_ids[user_id] = query.message.message_id
@@ -1660,19 +1722,19 @@ async def remove_admin_confirm(update: Update, context: ContextTypes.DEFAULT_TYP
         db.remove_admin(admin_id)
         db.add_log(user_id, "remove_admin", f"Removed admin {admin_id}")
         await query.edit_message_text(
-            f"✅ ادمین <code>{admin_id}</code> حذف شد!",
+            f"✅ <b>ادمین</b> <code>{admin_id}</code> <b>حذف شد!</b>",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
     else:
-        await query.answer("❌ یافت نشد!", show_alert=True)
+        await query.answer("❌ <b>یافت نشد!</b>", show_alert=True)
 
 async def list_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
     if not check_user_access(update):
-        await query.answer("🚫 دسترسی غیرمجاز!", show_alert=True)
+        await query.answer("🚫 <b>دسترسی غیرمجاز!</b>", show_alert=True)
         return
     
     user_id = query.from_user.id
@@ -1781,7 +1843,8 @@ async def async_main():
     print("✅ همه پیام‌ها ویرایشی")
     print("✅ فقط مالک‌ها دسترسی کامل دارند")
     print("✅ ادمین‌ها دسترسی محدود دارند")
-    print("✅ دکمه برنامه نویس اضافه شد")
+    print("✅ محدودیت گزارش برای ادمین‌ها (۱ ساعت)")
+    print("✅ دکمه درباره تیم اضافه شد")
     print("=" * 50)
     
     await app.initialize()
