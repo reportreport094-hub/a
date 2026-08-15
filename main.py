@@ -1091,7 +1091,7 @@ async def handle_report_repeat(update: Update, context: ContextTypes.DEFAULT_TYP
             parse_mode='HTML'
         )
 
-# ==================== اجرای ریپورت (بدون جوین) ====================
+# ==================== اجرای ریپورت ====================
 
 async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -1143,7 +1143,6 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         total_fail = 0
         all_results = []
         
-        # ریپورت بدون جوین شدن
         for post_index, msg_id in enumerate(posts, 1):
             for text_index, report_text in enumerate(report_texts, 1):
                 success = 0
@@ -1179,7 +1178,7 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             entity = await client.get_entity(f"@{group}")
                         except Exception as e:
                             fail += 1
-                            results.append(f"❌ {mask_phone(account['phone'])}: کانال نامعتبر - {str(e)[:30]}")
+                            results.append(f"❌ {mask_phone(account['phone'])}: کانال نامعتبر")
                             await client.disconnect()
                             continue
                         
@@ -1200,20 +1199,19 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                 await asyncio.sleep(min(e.seconds, 10))
                             except Exception as e:
                                 fail += 1
-                                results.append(f"❌ {mask_phone(account['phone'])}: خطا - {str(e)[:30]}")
+                                results.append(f"❌ {mask_phone(account['phone'])}: خطا")
                                 await asyncio.sleep(1)
                         
                         await client.disconnect()
                         
                     except Exception as e:
                         fail += 1
-                        results.append(f"❌ {mask_phone(account['phone'])}: خطا - {str(e)[:30]}")
+                        results.append(f"❌ {mask_phone(account['phone'])}: خطا")
                 
                 total_success += success
                 total_fail += fail
                 all_results.extend(results)
         
-        # ثبت گزارش
         report_id = db.add_report(
             group, group_link, str(report_texts), count, repeat,
             total_success, total_fail, total_success + total_fail,
@@ -1267,6 +1265,8 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         processing_reports.discard(user_id)
         if user_id in report_temp:
             del report_temp[user_id]
+
+# ==================== ارسال به کانال ====================
 
 async def send_report_to_channel(context, report_data):
     try:
@@ -1590,11 +1590,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif state == "waiting_report_repeat":
             await handle_report_repeat(update, context)
 
-# ==================== اجرا ====================
+# ==================== اجرا (رفع مشکل Event Loop) ====================
 
 def main():
+    """تابع اصلی با رفع مشکل Event Loop در پایتون 3.13"""
+    # ایجاد Application
     app = Application.builder().token(TOKEN).build()
     
+    # حذف webhook با استفاده از asyncio.run()
     async def delete_webhook():
         try:
             await app.bot.delete_webhook()
@@ -1602,14 +1605,20 @@ def main():
         except Exception as e:
             logger.error(f"Error deleting webhook: {e}")
     
+    # اجرای delete_webhook با مدیریت صحیح event loop
     try:
         asyncio.run(delete_webhook())
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(delete_webhook())
-        loop.close()
+    except RuntimeError as e:
+        if "no current event loop" in str(e):
+            # برای پایتون 3.13
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(delete_webhook())
+            loop.close()
+        else:
+            raise
     
+    # اضافه کردن هندلرها
     app.add_handler(CommandHandler("start", start))
     
     app.add_handler(CallbackQueryHandler(add_account_start, pattern="add_account"))
@@ -1646,8 +1655,10 @@ def main():
     print("✅ بدون نیاز به جوین شدن")
     print("✅ شماره‌ها سانسور میشن")
     print("✅ پشتیبانی از چندین پست و متن")
+    print("✅ سازگار با پایتون 3.13")
     print("=" * 50)
     
+    # اجرا با مدیریت صحیح event loop
     app.run_polling()
 
 if __name__ == "__main__":
