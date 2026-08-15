@@ -1,3 +1,4 @@
+```python
 import os
 import re
 import logging
@@ -422,7 +423,6 @@ async def handle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     phone = update.message.text.strip()
-    # حذف نمیکنیم - فقط پیام کاربر رو نادیده میگیریم
     
     if not re.match(r'^\+?[0-9]{10,15}$', phone):
         await update.message.reply_text(
@@ -857,7 +857,7 @@ async def report_group_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     report_temp[user_id] = {
         "posts": [],
-        "report_text": None,
+        "report_texts": [],  # لیست متن‌های گزارش
         "count": None,
         "repeat": None,
         "group": None,
@@ -871,7 +871,7 @@ async def report_group_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "برای ارسال گزارش علیه یک کانال، مراحل زیر را به ترتیب طی کنید:\n\n"
         "1️⃣ <b>لینک کانال:</b> لینک کانال مورد نظر را ارسال کنید\n"
         "2️⃣ <b>لینک پست‌ها:</b> لینک پست‌های مورد نظر را ارسال کنید (می‌توانید چندین پست بفرستید)\n"
-        "3️⃣ <b>متن گزارش:</b> متن گزارش را وارد کنید\n"
+        "3️⃣ <b>متن گزارش:</b> متن گزارش را وارد کنید (می‌توانید چندین متن بفرستید)\n"
         "4️⃣ <b>تعداد اکانت‌ها:</b> تعداد اکانت‌ها برای ارسال گزارش را مشخص کنید\n"
         "5️⃣ <b>تعداد دفعات:</b> تعداد دفعات ارسال گزارش را تعیین کنید\n\n"
         "📎 <b>لطفاً لینک کانال</b> را ارسال کنید:\n"
@@ -993,8 +993,12 @@ async def no_more_posts(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "لطفاً <b>متن گزارش</b> خود را وارد کنید.\n"
         "این متنی است که به عنوان دلیل گزارش به تلگرام ارسال می‌شود.\n"
         "مثال: <i>این کانال کلاهبرداری است و کاربران را فریب می‌دهد</i>\n\n"
-        "⚠️ توجه: متن باید حداقل ۱۰ کاراکتر باشد.",
-        reply_markup=back_button(),
+        "💡 <b>نکته:</b> می‌توانید چندین متن گزارش ارسال کنید.\n"
+        "پس از ارسال همه متن‌ها، روی دکمه <b>'✅ متن دیگری ندارم'</b> کلیک کنید.\n\n"
+        "⚠️ توجه: هر متن باید حداقل ۱۰ کاراکتر باشد.",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ متن دیگری ندارم", callback_data="no_more_texts")]
+        ]),
         parse_mode='HTML'
     )
 
@@ -1009,19 +1013,60 @@ async def handle_report_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text(
             "❌ متن گزارش بسیار کوتاه است!\n\n"
             "لطفاً متنی با حداقل ۱۰ کاراکتر وارد کنید.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ متن دیگری ندارم", callback_data="no_more_texts")]
+            ]),
+            parse_mode='HTML'
+        )
+        return
+    
+    if "report_texts" not in report_temp[user_id]:
+        report_temp[user_id]["report_texts"] = []
+    
+    if report_text not in report_temp[user_id]["report_texts"]:
+        report_temp[user_id]["report_texts"].append(report_text)
+    
+    await update.message.reply_text(
+        f"✅ متن گزارش با موفقیت ثبت شد! (تعداد: {len(report_temp[user_id]['report_texts'])})\n\n"
+        "📎 برای ارسال متن دیگر، متن بعدی را بفرستید.\n"
+        "✅ اگر متن دیگری ندارید، روی دکمه زیر کلیک کنید.",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ متن دیگری ندارم", callback_data="no_more_texts")]
+        ]),
+        parse_mode='HTML'
+    )
+
+async def no_more_texts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    if user_id not in user_states or user_states[user_id] != "waiting_report_text":
+        await query.answer("⚠️ در این مرحله نیستید!", show_alert=True)
+        return
+    
+    if "report_texts" not in report_temp[user_id] or not report_temp[user_id]["report_texts"]:
+        await query.edit_message_text(
+            "❌ شما هیچ متن گزارشی ارسال نکرده‌اید!\n\n"
+            "لطفاً حداقل یک متن گزارش ارسال کنید.",
             reply_markup=back_button(),
             parse_mode='HTML'
         )
         return
     
-    report_temp[user_id]["report_text"] = report_text
     report_temp[user_id]["current_step"] = "count"
     user_states[user_id] = "waiting_report_count"
     
     accounts = db.get_accounts()
     available = len(accounts)
-    await update.message.reply_text(
-        f"✅ متن گزارش با موفقیت ثبت شد.\n\n"
+    
+    text_preview = "\n".join([f"• {t[:50]}..." for t in report_temp[user_id]["report_texts"][:3]])
+    if len(report_temp[user_id]["report_texts"]) > 3:
+        text_preview += f"\n• ... {len(report_temp[user_id]['report_texts'])-3} متن دیگر"
+    
+    await query.edit_message_text(
+        f"✅ <b>{len(report_temp[user_id]['report_texts'])}</b> متن گزارش با موفقیت ثبت شد.\n\n"
+        f"📄 <b>پیش‌نمایش متن‌ها:</b>\n{text_preview}\n\n"
         f"📊 <b>مرحله بعد: تعداد اکانت‌ها</b>\n\n"
         f"تعداد اکانت‌های موجود در سیستم: <b>{available}</b>\n\n"
         f"🔢 لطفاً <b>تعداد اکانت‌ها</b> را وارد کنید (حداکثر {available}):",
@@ -1090,12 +1135,15 @@ async def handle_report_repeat(update: Update, context: ContextTypes.DEFAULT_TYP
         
         temp = report_temp.get(user_id, {})
         
+        posts_count = len(temp.get('posts', []))
+        texts_count = len(temp.get('report_texts', []))
+        
         summary = f"""
 📋 <b>خلاصه گزارش:</b>
 
 🎯 <b>کانال:</b> {temp.get('group_link', 'نامشخص')}
-📝 <b>تعداد پست‌ها:</b> {len(temp.get('posts', []))}
-📄 <b>متن گزارش:</b> {temp.get('report_text', 'نامشخص')}
+📝 <b>تعداد پست‌ها:</b> {posts_count}
+📄 <b>تعداد متن‌های گزارش:</b> {texts_count}
 🔢 <b>تعداد اکانت‌ها:</b> {temp.get('count', 0)}
 🔄 <b>تعداد دفعات:</b> {temp.get('repeat', 0)}
 
@@ -1158,7 +1206,7 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         group = temp.get("group")
         group_link = temp.get("group_link")
-        text = temp.get("report_text", "گزارش کلاهبرداری و اسکم")
+        report_texts = temp.get("report_texts", ["گزارش کلاهبرداری و اسکم"])
         count = temp.get("count", 1)
         repeat = temp.get("repeat", 1)
         posts = temp.get("posts", [])
@@ -1175,136 +1223,138 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         all_join_results = []
         
         for post_index, msg_id in enumerate(posts, 1):
-            success = 0
-            fail = 0
-            results = []
-            join_results = []
-            
-            # مرحله 1: جوین شدن به کانال
-            for account in accounts:
-                try:
-                    session_file = account.get("session_file")
-                    if not session_file or not os.path.exists(session_file):
-                        join_results.append(f"❌ {mask_phone(account['phone'])}: سشن یافت نشد")
-                        continue
-                    
-                    api_id = account.get("api_id")
-                    api_hash = account.get("api_hash")
-                    
-                    if not api_id or not api_hash:
-                        logger.error(f"API credentials missing for {account['phone']}")
-                        db.mark_account_invalid(account['phone'], "Missing API credentials")
-                        join_results.append(f"❌ {mask_phone(account['phone'])}: اطلاعات API موجود نیست")
-                        continue
-                    
-                    client = TelegramClient(session_file, int(api_id), api_hash)
-                    await client.connect()
-                    
-                    if not await client.is_user_authorized():
-                        db.mark_account_invalid(account['phone'], "Not authorized")
-                        join_results.append(f"❌ {mask_phone(account['phone'])}: احراز هویت نشده")
-                        await client.disconnect()
-                        continue
-                    
-                    try:
-                        entity = await client.get_entity(f"@{group}")
+            for text_index, report_text in enumerate(report_texts, 1):
+                success = 0
+                fail = 0
+                results = []
+                join_results = []
+                
+                # مرحله 1: جوین شدن به کانال (فقط یک بار برای هر اکانت)
+                if post_index == 1 and text_index == 1:
+                    for account in accounts:
                         try:
-                            await client(functions.channels.JoinChannelRequest(entity))
-                            join_results.append(f"✅ {mask_phone(account['phone'])}: جوین شد")
-                        except FloodWaitError as e:
-                            join_results.append(f"⏳ {mask_phone(account['phone'])}: صبر {e.seconds}s")
-                            await asyncio.sleep(min(e.seconds, 5))
+                            session_file = account.get("session_file")
+                            if not session_file or not os.path.exists(session_file):
+                                join_results.append(f"❌ {mask_phone(account['phone'])}: سشن یافت نشد")
+                                continue
+                            
+                            api_id = account.get("api_id")
+                            api_hash = account.get("api_hash")
+                            
+                            if not api_id or not api_hash:
+                                logger.error(f"API credentials missing for {account['phone']}")
+                                db.mark_account_invalid(account['phone'], "Missing API credentials")
+                                join_results.append(f"❌ {mask_phone(account['phone'])}: اطلاعات API موجود نیست")
+                                continue
+                            
+                            client = TelegramClient(session_file, int(api_id), api_hash)
+                            await client.connect()
+                            
+                            if not await client.is_user_authorized():
+                                db.mark_account_invalid(account['phone'], "Not authorized")
+                                join_results.append(f"❌ {mask_phone(account['phone'])}: احراز هویت نشده")
+                                await client.disconnect()
+                                continue
+                            
+                            try:
+                                entity = await client.get_entity(f"@{group}")
+                                try:
+                                    await client(functions.channels.JoinChannelRequest(entity))
+                                    join_results.append(f"✅ {mask_phone(account['phone'])}: جوین شد")
+                                except FloodWaitError as e:
+                                    join_results.append(f"⏳ {mask_phone(account['phone'])}: صبر {e.seconds}s")
+                                    await asyncio.sleep(min(e.seconds, 5))
+                                except Exception as e:
+                                    if "already" in str(e).lower():
+                                        join_results.append(f"⚠️ {mask_phone(account['phone'])}: قبلاً جوین بود")
+                                    else:
+                                        join_results.append(f"❌ {mask_phone(account['phone'])}: خطا در جوین")
+                                await asyncio.sleep(1)
+                            except (ChannelInvalidError, ChannelPrivateError, UsernameNotOccupiedError):
+                                join_results.append(f"❌ {mask_phone(account['phone'])}: کانال نامعتبر")
+                            except Exception as e:
+                                join_results.append(f"❌ {mask_phone(account['phone'])}: خطا")
+                            
+                            await client.disconnect()
+                            db.update_account_last_used(account['phone'])
+                            
                         except Exception as e:
-                            if "already" in str(e).lower():
-                                join_results.append(f"⚠️ {mask_phone(account['phone'])}: قبلاً جوین بود")
-                            else:
-                                join_results.append(f"❌ {mask_phone(account['phone'])}: خطا در جوین")
-                        await asyncio.sleep(1)
-                    except (ChannelInvalidError, ChannelPrivateError, UsernameNotOccupiedError):
-                        join_results.append(f"❌ {mask_phone(account['phone'])}: کانال نامعتبر")
-                    except Exception as e:
-                        join_results.append(f"❌ {mask_phone(account['phone'])}: خطا")
-                    
-                    await client.disconnect()
-                    db.update_account_last_used(account['phone'])
-                    
-                except Exception as e:
-                    join_results.append(f"❌ {mask_phone(account['phone'])}: خطا")
-            
-            # مرحله 2: ارسال گزارش برای هر پست
-            for account in accounts:
-                try:
-                    session_file = account.get("session_file")
-                    if not session_file or not os.path.exists(session_file):
-                        fail += 1
-                        results.append(f"❌ {mask_phone(account['phone'])}: سشن یافت نشد")
-                        continue
-                    
-                    api_id = account.get("api_id")
-                    api_hash = account.get("api_hash")
-                    
-                    if not api_id or not api_hash:
-                        fail += 1
-                        results.append(f"❌ {mask_phone(account['phone'])}: اطلاعات API موجود نیست")
-                        continue
-                    
-                    client = TelegramClient(session_file, int(api_id), api_hash)
-                    await client.connect()
-                    
-                    if not await client.is_user_authorized():
-                        fail += 1
-                        results.append(f"❌ {mask_phone(account['phone'])}: احراز هویت نشده")
-                        await client.disconnect()
-                        continue
-                    
+                            join_results.append(f"❌ {mask_phone(account['phone'])}: خطا")
+                
+                # مرحله 2: ارسال گزارش برای هر پست و هر متن
+                for account in accounts:
                     try:
-                        entity = await client.get_entity(f"@{group}")
-                    except (ChannelInvalidError, ChannelPrivateError, UsernameNotOccupiedError):
-                        fail += 1
-                        results.append(f"❌ {mask_phone(account['phone'])}: کانال نامعتبر")
+                        session_file = account.get("session_file")
+                        if not session_file or not os.path.exists(session_file):
+                            fail += 1
+                            results.append(f"❌ {mask_phone(account['phone'])}: سشن یافت نشد")
+                            continue
+                        
+                        api_id = account.get("api_id")
+                        api_hash = account.get("api_hash")
+                        
+                        if not api_id or not api_hash:
+                            fail += 1
+                            results.append(f"❌ {mask_phone(account['phone'])}: اطلاعات API موجود نیست")
+                            continue
+                        
+                        client = TelegramClient(session_file, int(api_id), api_hash)
+                        await client.connect()
+                        
+                        if not await client.is_user_authorized():
+                            fail += 1
+                            results.append(f"❌ {mask_phone(account['phone'])}: احراز هویت نشده")
+                            await client.disconnect()
+                            continue
+                        
+                        try:
+                            entity = await client.get_entity(f"@{group}")
+                        except (ChannelInvalidError, ChannelPrivateError, UsernameNotOccupiedError):
+                            fail += 1
+                            results.append(f"❌ {mask_phone(account['phone'])}: کانال نامعتبر")
+                            await client.disconnect()
+                            continue
+                        except Exception as e:
+                            fail += 1
+                            results.append(f"❌ {mask_phone(account['phone'])}: خطا")
+                            await client.disconnect()
+                            continue
+                        
+                        for i in range(repeat):
+                            try:
+                                await client(functions.messages.ReportRequest(
+                                    peer=entity,
+                                    id=[msg_id],
+                                    reason=types.InputReportReasonSpam(),
+                                    message=report_text
+                                ))
+                                success += 1
+                                results.append(f"✅ {mask_phone(account['phone'])}: پست {post_index} - متن {text_index} - ریپورت {i+1} ارسال شد")
+                                await asyncio.sleep(2)
+                            except FloodWaitError as e:
+                                fail += 1
+                                results.append(f"⏳ {mask_phone(account['phone'])}: صبر {e.seconds}s")
+                                await asyncio.sleep(min(e.seconds, 10))
+                            except Exception as e:
+                                fail += 1
+                                results.append(f"❌ {mask_phone(account['phone'])}: خطا در ریپورت {i+1}")
+                                await asyncio.sleep(1)
+                        
                         await client.disconnect()
-                        continue
+                        db.update_account_last_used(account['phone'])
+                        
                     except Exception as e:
                         fail += 1
                         results.append(f"❌ {mask_phone(account['phone'])}: خطا")
-                        await client.disconnect()
-                        continue
-                    
-                    for i in range(repeat):
-                        try:
-                            await client(functions.messages.ReportRequest(
-                                peer=entity,
-                                id=[msg_id],
-                                reason=types.InputReportReasonSpam(),
-                                message=text
-                            ))
-                            success += 1
-                            results.append(f"✅ {mask_phone(account['phone'])}: ریپورت پست {post_index} - {i+1} ارسال شد")
-                            await asyncio.sleep(2)
-                        except FloodWaitError as e:
-                            fail += 1
-                            results.append(f"⏳ {mask_phone(account['phone'])}: صبر {e.seconds}s")
-                            await asyncio.sleep(min(e.seconds, 10))
-                        except Exception as e:
-                            fail += 1
-                            results.append(f"❌ {mask_phone(account['phone'])}: خطا در ریپورت {i+1}")
-                            await asyncio.sleep(1)
-                    
-                    await client.disconnect()
-                    db.update_account_last_used(account['phone'])
-                    
-                except Exception as e:
-                    fail += 1
-                    results.append(f"❌ {mask_phone(account['phone'])}: خطا")
-            
-            total_success += success
-            total_fail += fail
-            all_results.extend(results)
-            all_join_results.extend(join_results)
+                
+                total_success += success
+                total_fail += fail
+                all_results.extend(results)
+                all_join_results.extend(join_results)
         
         # ثبت گزارش
         report_id = db.add_report(
-            group, group_link, text, count, repeat,
+            group, group_link, str(report_texts), count, repeat,
             total_success, total_fail, total_success + total_fail,
             all_join_results, all_results, user_id
         )
@@ -1316,6 +1366,7 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 🎯 <b>کانال:</b> {group_link}
 📝 <b>تعداد پست‌ها:</b> {len(posts)}
+📄 <b>تعداد متن‌های گزارش:</b> {len(report_texts)}
 ✅ <b>ریپورت موفق:</b> {total_success}
 ❌ <b>خطا:</b> {total_fail}
 📋 <b>مجموع:</b> {total_success + total_fail}
@@ -1350,7 +1401,7 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # ارسال به کانال
         await send_report_to_channel(context, {
             "group_link": group_link,
-            "text": text,
+            "text": str(report_texts),
             "accounts": count,
             "repeat": repeat,
             "success": total_success,
@@ -1358,7 +1409,8 @@ async def execute_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "total": total_success + total_fail,
             "results": all_results,
             "date": datetime.now().isoformat(),
-            "posts_count": len(posts)
+            "posts_count": len(posts),
+            "texts_count": len(report_texts)
         })
         
     except Exception as e:
@@ -1377,7 +1429,7 @@ async def send_report_to_channel(context, report_data):
 📊 <b>گزارش جدید ریپورت</b>
 
 🎯 <b>کانال:</b> {report_data.get('group_link', 'نامشخص')}
-📝 <b>متن گزارش:</b> {report_data.get('text', 'نامشخص')}
+📝 <b>تعداد متن‌ها:</b> {report_data.get('texts_count', 0)}
 📝 <b>تعداد پست‌ها:</b> {report_data.get('posts_count', 0)}
 🔢 <b>تعداد اکانت‌ها:</b> {report_data.get('accounts', 0)}
 🔄 <b>تعداد دفعات:</b> {report_data.get('repeat', 0)}
@@ -1642,7 +1694,7 @@ async def help_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 <b>🛡 ریپورت کانال:</b>
 برای گزارش کانال‌های متخلف
-مراحل: لینک کانال → لینک پست‌ها (چندتایی) → متن گزارش → تعداد اکانت → تعداد دفعات
+مراحل: لینک کانال → لینک پست‌ها (چندتایی) → متن‌های گزارش (چندتایی) → تعداد اکانت → تعداد دفعات
 
 <b>➕ افزودن اکانت:</b>
 اضافه کردن اکانت تلگرام با سشن
@@ -1755,6 +1807,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     app = Application.builder().token(TOKEN).build()
     
+    # حذف Webhook برای جلوگیری از خطای 409 Conflict
+    try:
+        import asyncio
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(app.bot.delete_webhook())
+        loop.close()
+        logger.info("Webhook deleted successfully")
+    except Exception as e:
+        logger.error(f"Error deleting webhook: {e}")
+    
     app.add_handler(CommandHandler("start", start))
     
     app.add_handler(CallbackQueryHandler(add_account_start, pattern="add_account"))
@@ -1764,6 +1827,7 @@ def main():
     app.add_handler(CallbackQueryHandler(report_group_start, pattern="report_group"))
     app.add_handler(CallbackQueryHandler(execute_report, pattern="^execute_report_"))
     app.add_handler(CallbackQueryHandler(no_more_posts, pattern="no_more_posts"))
+    app.add_handler(CallbackQueryHandler(no_more_texts, pattern="no_more_texts"))
     app.add_handler(CallbackQueryHandler(show_reports, pattern="reports"))
     app.add_handler(CallbackQueryHandler(manage_admins, pattern="manage_admins"))
     app.add_handler(CallbackQueryHandler(add_admin, pattern="add_admin"))
@@ -1790,11 +1854,15 @@ def main():
     print("✅ هیچ پیامی حذف نمیشه")
     print("✅ شماره‌ها سانسور میشن (989******458)")
     print("✅ پشتیبانی از چندین لینک پست")
+    print("✅ پشتیبانی از چندین متن گزارش")
     print("✅ دکمه 'پست دیگری ندارم'")
+    print("✅ دکمه 'متن دیگری ندارم'")
     print("✅ متن‌ها با توضیحات کامل")
+    print("✅ Webhook غیرفعال شد - خطای 409 رفع شد")
     print("=" * 50)
     
     app.run_polling()
 
 if __name__ == "__main__":
     main()
+```
